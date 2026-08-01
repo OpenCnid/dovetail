@@ -34,11 +34,17 @@ gate; installing it so it can be invoked does.
 - **Moving a pin ships new instructions to everyone who installs the pack.**
   Read `git diff --submodule=log` before committing a bump. `scripts/sync.sh`
   deliberately does not commit for you.
-- **The two layouts are real and are spelled out, not detected.** Six skills keep
-  `SKILL.md` at their repository root; `self-play` and `subagent-composition`
-  keep theirs at `.claude/skills/<name>/SKILL.md`. Both `plugin.json` and
-  `install.sh` enumerate every path explicitly. If you add a skill, add its path
-  to both — a globbed guess is how one of them silently stops shipping.
+- **The layout rule, and its one exception.** A skill directory is *exactly what
+  should land in `~/.claude/skills/<name>/`*. Seven sources therefore keep the
+  skill at `.claude/skills/<name>/`, so copying that directory carries the skill
+  and nothing else — no README, no licence, no `.git`. `better-skill-creator` is
+  the exception and it is a real one: its `scripts/`, `references/`, `agents/`
+  and `tests/` are part of the skill, so its whole repository *is* the skill
+  directory.
+
+  Both `plugin.json` and `install.sh` enumerate every path explicitly. If you add
+  a skill, add its path to both — a glob that silently matches nothing installs a
+  hollow pack that looks fine.
 - **Claims in the README carry their evidence state.** The plugin install route
   is marked unverified because nobody has run it on a fresh machine. If you
   verify it, replace the caveat with what you observed and on which version. Do

@@ -29,16 +29,23 @@ for arg in "$@"; do
 done
 
 # Each entry is "<name>:<path to the directory holding SKILL.md>".
-# Two layouts exist among the sources; both are spelled out rather than guessed.
+#
+# Seven sources keep the skill at .claude/skills/<name>/ so that a copy of that
+# directory carries the skill and nothing else. better-skill-creator is the one
+# exception and it is a real one: its scripts/, references/, agents/ and tests/
+# are part of the skill, so its whole repository is the skill directory.
+#
+# Every path is spelled out rather than globbed. A glob that silently matches
+# nothing installs a hollow pack that looks fine.
 SKILLS=(
-  "prompt-engineering:vendor/prompt-engineering"
-  "hypershot-protocol:vendor/hypershot-protocol"
+  "prompt-engineering:vendor/prompt-engineering/.claude/skills/prompt-engineering"
+  "hypershot-protocol:vendor/hypershot-protocol/.claude/skills/hypershot-protocol"
   "subagent-composition:vendor/subagent-composition/.claude/skills/subagent-composition"
-  "judge-composition:vendor/judge-composition"
+  "judge-composition:vendor/judge-composition/.claude/skills/judge-composition"
   "self-play:vendor/self-play/.claude/skills/self-play"
   "better-skill-creator:vendor/better-skill-creator"
-  "harness-traps:vendor/harness-traps"
-  "spark-steering:vendor/spark-steering"
+  "harness-traps:vendor/harness-traps/.claude/skills/harness-traps"
+  "spark-steering:vendor/spark-steering/.claude/skills/spark-steering"
 )
 
 # ---------------------------------------------------------------- submodules

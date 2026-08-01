@@ -19,13 +19,13 @@
     "skill-authoring"
   ],
   "skills": [
-    "./vendor/prompt-engineering",
-    "./vendor/hypershot-protocol",
+    "./vendor/prompt-engineering/.claude/skills/prompt-engineering",
+    "./vendor/hypershot-protocol/.claude/skills/hypershot-protocol",
     "./vendor/subagent-composition/.claude/skills/subagent-composition",
-    "./vendor/judge-composition",
+    "./vendor/judge-composition/.claude/skills/judge-composition",
     "./vendor/self-play/.claude/skills/self-play",
     "./vendor/better-skill-creator",
-    "./vendor/harness-traps",
-    "./vendor/spark-steering"
+    "./vendor/harness-traps/.claude/skills/harness-traps",
+    "./vendor/spark-steering/.claude/skills/spark-steering"
   ]
 }
