@@ -2,7 +2,7 @@
   "name": "dovetail",
   "displayName": "Dovetail",
   "version": "0.1.0",
-  "description": "Eight Claude Code skills that hold together by shape: author prompts without contaminating them, compose isolated sub-agents and judge panels, and verify the result in a clean room without fooling yourself.",
+  "description": "Seven Claude Code skills that hold together by shape: author prompts without contaminating them, compose isolated sub-agents and judge panels, and verify the result in a clean room without fooling yourself.",
   "author": {
     "name": "OpenCnid Labs",
     "url": "https://github.com/OpenCnid"
@@ -25,7 +25,6 @@
     "./vendor/judge-composition/.claude/skills/judge-composition",
     "./vendor/self-play/.claude/skills/self-play",
     "./vendor/better-skill-creator",
-    "./vendor/harness-traps/.claude/skills/harness-traps",
     "./vendor/spark-steering/.claude/skills/spark-steering"
   ]
 }

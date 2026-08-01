@@ -44,7 +44,6 @@ SKILLS=(
   "judge-composition:vendor/judge-composition/.claude/skills/judge-composition"
   "self-play:vendor/self-play/.claude/skills/self-play"
   "better-skill-creator:vendor/better-skill-creator"
-  "harness-traps:vendor/harness-traps/.claude/skills/harness-traps"
   "spark-steering:vendor/spark-steering/.claude/skills/spark-steering"
 )
 

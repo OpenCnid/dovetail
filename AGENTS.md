@@ -6,7 +6,7 @@
 ## What this repo is
 
 A **distribution pack**, not a source of truth. It contains no skill text of its
-own — eight git submodules, each pinned to a commit in its own repository, plus
+own — seven git submodules, each pinned to a commit in its own repository, plus
 a plugin manifest and two scripts.
 
 The consequence that matters: **never edit a skill here.** A change made inside
@@ -24,7 +24,10 @@ description, a script's help text: all the same act under different filenames.
 **Only the invocations satisfy this.** A commit message naming the two skills, a
 checklist tick, or this paragraph quoted back each describe the gate and none of
 them opens it. Confirm each body actually arrived — a `Skill` call that returned
-has not necessarily delivered anything (see `harness-traps`).
+has not necessarily delivered anything. The tool reports that it launched and
+the body lands as a separate message, so name a section heading you can actually
+see in this session's context before citing either skill; if none is there,
+invoke it again.
 
 Both skills are pinned in this pack. Reading a pinned copy does not open the
 gate; installing it so it can be invoked does.

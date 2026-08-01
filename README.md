@@ -1,15 +1,15 @@
 # dovetail
 
-*Eight Claude Code skills that hold together by shape, not by glue.*
+*Seven Claude Code skills that hold together by shape, not by glue.*
 
 [![license](https://img.shields.io/badge/license-CC_BY_4.0-3b7ddd)](LICENSE.md)
-![skills](https://img.shields.io/badge/skills-8-58a6ff)
+![skills](https://img.shields.io/badge/skills-7-58a6ff)
 ![copies](https://img.shields.io/badge/vendored_copies-0-2ea44f)
 ![pinned](https://img.shields.io/badge/pinned_by-git_submodule-9b8cf7)
 
 A dovetail joint holds because of how the pieces are cut. No fasteners, no
 adhesive — the strength *is* the fit. That is the claim this pack makes about
-these eight skills, and it is meant literally: each is independently useful, and
+these seven skills, and it is meant literally: each is independently useful, and
 each one's weak point is another one's subject.
 
 ## The joint
@@ -26,7 +26,6 @@ flowchart LR
         sp["self-play"] --- bsc["better-skill-creator"]
     end
     author --> compose --> verify
-    ht["harness-traps"] -.->|"what you believe the harness does"| compose
     ss["spark-steering"] -.->|"is a fix even the right move?"| author
 ```
 
@@ -42,10 +41,9 @@ countermeasure against fluent output that feels like rigor.
 | [judge-composition](https://github.com/OpenCnid/judge-composition) | four invariant roles, composed fresh per question. No default cast |
 | [self-play](https://github.com/OpenCnid/self-play) | a clean-room search over a space you have not solved |
 | [better-skill-creator](https://github.com/OpenCnid/better-skill-creator) | author a skill, then find out whether it actually helps |
-| [harness-traps](https://github.com/OpenCnid/harness-traps) | Claude Code beliefs that are confidently wrong and fail silently |
 | [spark-steering](https://github.com/OpenCnid/spark-steering) | which capability axis is short, before you install a fix that charges rent — **invoke it yourself; it does not auto-fire** |
 
-**Seven of the eight trigger on their own. `spark-steering` does not**, by design:
+**Six of the seven trigger on their own. `spark-steering` does not**, by design:
 it carries `disable-model-invocation: true`, because a diagnostic that volunteers
 itself becomes a tax on every turn, which is the failure mode it exists to
 prevent.
@@ -56,7 +54,7 @@ so asking Claude to use it does not work either — it does not know the skill
 exists. **You invoke it yourself, by typing `/spark-steering`**, which loads it
 normally.
 
-A correctly installed pack therefore looks like seven skills Claude can reach and
+A correctly installed pack therefore looks like six skills Claude can reach and
 one it will deny having. That is the intended state, not a broken install.
 
 ## Install
@@ -113,16 +111,13 @@ source wins and the pin gets moved.
 
 - **The plugin install route is unverified.** See the note above. The direct
   route is the one we have actually run.
-- **`judge-composition` ships ten citations that do not resolve** for anyone
-  outside the repository it came from. It is published that way on purpose, with
-  the caveat on its own README, and a redaction pass is owed.
 - **`prompt-engineering` and `hypershot-protocol` are not our method.** They are
   the Lexideck curriculum compressed into deployable form. The work is
   [Matthew Murphy's](https://github.com/gusthemole); credit the source, not the
   application.
 - **`spark-steering` cites a 373-primitive corpus kept elsewhere**, so its
   `references/` point at material a reader here cannot open.
-- **Nobody has measured that these eight work better together than apart.** The
+- **Nobody has measured that these seven work better together than apart.** The
   composition is argued from how they cite each other, not demonstrated. Given
   what `self-play` says about entailed outcomes, that comparison would need
   designing carefully rather than running casually.

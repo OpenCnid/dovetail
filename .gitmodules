@@ -13,9 +13,6 @@
 [submodule "vendor/judge-composition"]
 	path = vendor/judge-composition
 	url = https://github.com/OpenCnid/judge-composition.git
-[submodule "vendor/harness-traps"]
-	path = vendor/harness-traps
-	url = https://github.com/OpenCnid/harness-traps.git
 [submodule "vendor/spark-steering"]
 	path = vendor/spark-steering
 	url = https://github.com/OpenCnid/spark-steering.git
