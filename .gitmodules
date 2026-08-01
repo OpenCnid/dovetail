@@ -1,0 +1,24 @@
+[submodule "vendor/self-play"]
+	path = vendor/self-play
+	url = https://github.com/OpenCnid/self-play.git
+[submodule "vendor/subagent-composition"]
+	path = vendor/subagent-composition
+	url = https://github.com/OpenCnid/subagent-composition.git
+[submodule "vendor/prompt-engineering"]
+	path = vendor/prompt-engineering
+	url = https://github.com/OpenCnid/prompt-engineering.git
+[submodule "vendor/hypershot-protocol"]
+	path = vendor/hypershot-protocol
+	url = https://github.com/OpenCnid/hypershot-protocol.git
+[submodule "vendor/judge-composition"]
+	path = vendor/judge-composition
+	url = https://github.com/OpenCnid/judge-composition.git
+[submodule "vendor/harness-traps"]
+	path = vendor/harness-traps
+	url = https://github.com/OpenCnid/harness-traps.git
+[submodule "vendor/spark-steering"]
+	path = vendor/spark-steering
+	url = https://github.com/OpenCnid/spark-steering.git
+[submodule "vendor/better-skill-creator"]
+	path = vendor/better-skill-creator
+	url = https://github.com/OpenCnid/better-skill-creator.git

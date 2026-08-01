@@ -1,0 +1,14 @@
+{
+  "name": "opencnid",
+  "owner": {
+    "name": "OpenCnid Labs",
+    "url": "https://github.com/OpenCnid"
+  },
+  "plugins": [
+    {
+      "name": "dovetail",
+      "source": "./",
+      "description": "Eight skills for authoring prompts, composing isolated sub-agents, and verifying what comes back without fooling yourself."
+    }
+  ]
+}
