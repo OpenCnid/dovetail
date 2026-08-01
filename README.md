@@ -43,7 +43,21 @@ countermeasure against fluent output that feels like rigor.
 | [self-play](https://github.com/OpenCnid/self-play) | a clean-room search over a space you have not solved |
 | [better-skill-creator](https://github.com/OpenCnid/better-skill-creator) | author a skill, then find out whether it actually helps |
 | [harness-traps](https://github.com/OpenCnid/harness-traps) | Claude Code beliefs that are confidently wrong and fail silently |
-| [spark-steering](https://github.com/OpenCnid/spark-steering) | which capability axis is short, before you install a fix that charges rent |
+| [spark-steering](https://github.com/OpenCnid/spark-steering) | which capability axis is short, before you install a fix that charges rent — **invoke it yourself; it does not auto-fire** |
+
+**Seven of the eight trigger on their own. `spark-steering` does not**, by design:
+it carries `disable-model-invocation: true`, because a diagnostic that volunteers
+itself becomes a tax on every turn, which is the failure mode it exists to
+prevent.
+
+Verified on CLI 2.1.214 by asking a headless session to enumerate its skills:
+**`spark-steering` does not appear in that list at all.** The model cannot see it,
+so asking Claude to use it does not work either — it does not know the skill
+exists. **You invoke it yourself, by typing `/spark-steering`**, which loads it
+normally.
+
+A correctly installed pack therefore looks like seven skills Claude can reach and
+one it will deny having. That is the intended state, not a broken install.
 
 ## Install
 
