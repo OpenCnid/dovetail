@@ -5,8 +5,9 @@
 
 ## What this repo is
 
-**The source of truth for nine skills**, in one repository, plus a plugin
-manifest, a `SessionStart` hook, and the scripts that install and test them.
+**The source of truth for eight skills**, in one repository, plus a plugin
+manifest and the scripts that install and test them. No hooks: see below for
+why, and for what it would take to add one.
 
 It did not used to be. Until `0.3.0` this was a distribution pack: eight git
 submodules pinned to commits in eight repositories, which it shipped without
@@ -61,21 +62,23 @@ installing it so it can be invoked does.
   enumerates every skill explicitly, and `test-skills.sh` counts its list against
   the directories on disk — so a skill added to one and not the other fails
   loudly instead of installing on one route and not the other.
-- **A skill's own hooks do not fire on the plugin route.** A nested
-  `.claude-plugin/plugin.json` is honoured only where the directory is a plugin
-  in its own right — that is the `install.sh` route, where each skill lands in
-  `~/.claude/skills/<name>/` and auto-loads as `<name>@skills-dir`. Loaded as
-  components of this plugin, those manifests are ignored and their hooks never
-  register. Fixing the matcher does not help; the namespaced `command_name` is a
-  symptom, not the cause.
+- **This pack ships no hooks, and adding one is harder than it looks.** A
+  skill's own `.claude-plugin/plugin.json` and `hooks/` are honoured only where
+  that directory is a plugin in its own right — the `install.sh` route, where it
+  lands in `~/.claude/skills/<name>/` and auto-loads as `<name>@skills-dir`.
+  Loaded as components of this plugin they are ignored entirely, and fixing the
+  matcher does not help: the namespaced `command_name` is a symptom, not the
+  cause. Pack-wide behaviour would have to live in `hooks/hooks.json` at this
+  root.
 
-  So **pack-wide behaviour belongs in `hooks/hooks.json` at this root**, which is
-  where the `SessionStart` injection of `using-dovetail` lives. Probed
-  arm-by-arm on CLI 2.1.214, Windows 10, with negative controls, through both
-  `--plugin-dir` and a real `marketplace add` + `install`. What was *not* checked
-  is whether the injected context changes what the model then invokes — that
-  needs an authenticated session, and the scratch config used for the probes is
-  not logged in.
+  There was such a hook until `0.4.0`, injecting an entry skill on
+  `SessionStart`. It was removed because it cost about 576 tokens of every
+  session to carry one fact nothing else carried — that `upsum` exists — while
+  `upsum` is deliberately invisible so that it *does not* volunteer itself. The
+  companion rule it also carried is held by the four skills that author prompt
+  bytes, in their own bodies, at no recurring cost. Probed on CLI 2.1.214,
+  Windows 10; `git log` has the mechanism if a real pack-wide need appears.
+
 - **A skill that loads is not a skill that works.** `scripts/test-skills.sh`
   proves each body reaches the session and cannot prove the model acts on it.
   Keep that distinction in anything you write about it.
@@ -87,8 +90,8 @@ installing it so it can be invoked does.
   version. Do not quietly delete it.
 - **Attribution is not decoration.** The prompt-engineering toolkit and the
   hypershot technique are Matthew Murphy's. Any document here that teaches the
-  technique credits him. The `run-hook.cmd` polyglot and the entry-skill
-  injection pattern are `obra/superpowers`'.
+  technique credits him. The `skills/<name>/` layout and the auto-discovered
+  manifest follow `obra/superpowers`.
 
 ## Adding a skill
 

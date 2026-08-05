@@ -1,5 +1,40 @@
 # Dovetail Release Notes
 
+## v0.4.0 (2026-08-05)
+
+**The entry skill and the `SessionStart` hook are gone.** The pack ships eight
+skills and adds nothing to a session it is not asked for.
+
+`using-dovetail` was added at `0.2.0` to carry two things into every session: the
+rule that `prompt-engineering` and `hypershot-protocol` load before any prompt
+bytes are authored, and the notice that `spark-steering` and `upsum` are
+invisible to the model. Measured against what the rest of the pack already
+carries, neither survived:
+
+- **The companion rule was already where it was needed.** `subagent-composition`
+  and `judge-composition` name both companions *in their descriptions*, so the
+  pairing is visible before either is invoked, and again in their bodies;
+  `self-play` carries it in its body. The one real gap was
+  `better-skill-creator`, which mentioned neither — now fixed with two sentences
+  in its own body, at no recurring cost.
+- **`spark-steering` is named by six skills,** three of which the model can see.
+  It did not need an entry point to be discoverable.
+- **That left one fact nothing else carried: that `upsum` exists.** For which the
+  hook spent about 576 tokens of every session — and `upsum` carries
+  `disable-model-invocation` precisely so that it does *not* volunteer itself. A
+  note in every session inviting the model to suggest it works against the
+  reason the flag is there.
+
+`hooks/` went with it — `hooks.json`, the `session-start` script, and the
+`run-hook.cmd` polyglot. Keeping tested-but-unused machinery for a future that
+may not come is how a repository accumulates weight nobody can account for;
+`git log` has all of it if a real pack-wide need appears. What the removal cost
+in knowledge is recorded in `AGENTS.md` instead: a skill's own hooks are inert
+on the plugin route, so anything pack-wide has to live at the root, and now
+nothing does.
+
+`test-skills.sh` loses its `SessionStart` arm and keeps everything else.
+
 ## v0.3.0 (2026-08-05)
 
 **This repository stopped being a distribution pack and became the source of

@@ -62,10 +62,8 @@ normally. `upsum` carries the same flag and `/upsum` loads it the same way; that
 one has not been put through the headless check, so treat its absence from the
 list as expected rather than as observed.
 
-A correctly installed pack therefore looks like **seven skills Claude can reach
-and two it will deny having** — the six above plus `using-dovetail`, the entry
-point the `SessionStart` hook injects. That is the intended state, not a broken
-install.
+A correctly installed pack therefore looks like six skills Claude can reach and
+two it will deny having. That is the intended state, not a broken install.
 
 ## Install
 
@@ -80,20 +78,21 @@ install.
 Plugin skills are namespaced, so they cannot collide with skills you already
 have — you'll reach them as `dovetail:self-play` and so on.
 
-Installing the pack loads all nine skills at once, and a `SessionStart` hook
-injects `dovetail:using-dovetail` — the companion rule, and the notice that two
-of the skills are invisible to the model — into every session.
+Installing the pack loads all eight skills at once. Nothing is added to every
+session: the pack's always-on cost is its eight descriptions and nothing else.
 
 > [!NOTE]
 > **Verified from GitHub**, which this note used to say was the open question.
 > On CLI 2.1.214 (Windows 10), `marketplace add` of the HTTPS URL followed by
-> `install` reports `Skills (9)` and `Hooks (1) SessionStart`, and all nine
-> bodies load in a session.
+> `install` registers every skill in the pack and all their bodies load in a
+> session.
 >
 > That run predates `0.3.0`, when the skills were still submodules and whether a
 > plugin fetch recursed into them was the open doubt. It did. The question is now
 > moot — there are no submodules to recurse into — and the result is kept because
-> it is what retired the doubt rather than sidestepping it.
+> it is what retired the doubt rather than sidestepping it. The counts it
+> reported were nine skills and one hook; `0.4.0` removed the ninth and the
+> hook.
 >
 > Two things that will bite on Windows, both observed:
 >
@@ -152,9 +151,9 @@ every skill still loads rather than that every pointer still points.
   machine cannot see.
 - **A skill that loads is not a skill that works.** `scripts/test-skills.sh`
   proves each body reaches the session; it cannot prove the model then acts on
-  it. That distinction is not pedantic — the injected `SessionStart` directive
-  is verified to arrive and unverified to change behavior, which needs an
-  authenticated run the harness deliberately does not require.
+  it. Nothing here measures whether a loaded skill changes what the model does —
+  that needs an authenticated run, which the harness deliberately does not
+  require so that it costs nothing to run.
 - **`prompt-engineering` and `hypershot-protocol` are not our method.** They are
   the Lexideck curriculum compressed into deployable form. The work is
   [Matthew Murphy's](https://github.com/gusthemole); credit the source, not the

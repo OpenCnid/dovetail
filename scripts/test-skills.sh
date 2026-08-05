@@ -29,7 +29,6 @@ STATIC_ONLY=0
 
 # Keep in step with SKILLS in install.sh and skills in plugin.json.
 SKILLS=(
-  "using-dovetail:skills/using-dovetail"
   "prompt-engineering:skills/prompt-engineering"
   "hypershot-protocol:skills/hypershot-protocol"
   "subagent-composition:skills/subagent-composition"
@@ -129,9 +128,8 @@ transcript_for() {
 
 # Pick a canary the transcript cannot satisfy by accident.
 #
-# Every transcript already contains the injected using-dovetail body and an
-# 11KB listing of every skill description, so a short canary passes without the
-# body ever loading — a `## ` heading word scored nine of nine here while two
+# Every transcript already contains an 11KB listing of every skill description,
+# so a short canary passes without the body ever loading — a `## ` heading word scored nine of nine here while two
 # skills were in fact loading nothing. Requirements: long, drawn from the body
 # rather than the frontmatter (descriptions are echoed in the listing), and
 # present in exactly one shipped skill.
@@ -179,17 +177,6 @@ for entry in "${SKILLS[@]}"; do
     note FAIL "$name" "resolved but body absent"; fail=1
   fi
 done
-
-# the SessionStart injection is the only channel that reaches the model before
-# it acts, and the only notice it gets that two skills are invisible to it
-out="$(claude -p "probe" --output-format json 2>/dev/null || true)"
-sid="$(printf '%s' "$out" | sed -n 's/.*"session_id":"\([^"]*\)".*/\1/p')"
-tf="$(transcript_for "$sid")"
-if [ -n "$tf" ] && grep -qF "The companion rule" "$tf"; then
-  note ok "SessionStart" "using-dovetail injected with no skill invoked"
-else
-  note FAIL "SessionStart" "entry skill did not reach session context"; fail=1
-fi
 
 echo
 if [ "$fail" -eq 0 ]; then
