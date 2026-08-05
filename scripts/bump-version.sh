@@ -58,7 +58,10 @@ for entry in spec["files"]:
     found[f"{path} {field}"] = current
     if not check and current != target:
         put(data, field, target)
-        with open(path, "w") as f:
+        # newline="\n" explicitly: .gitattributes declares eol=lf, and Python's
+        # default text mode writes CRLF on Windows. Without this the script
+        # quietly rewrites every line of the file it was asked to touch once.
+        with open(path, "w", newline="\n") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
         changed += 1
