@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Skills that hold together by shape: author prompts without contaminating them, compose isolated sub-agents and judge panels, verify the result without fooling yourself, and close the session on purpose.",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "plugins": [
     {
       "name": "dovetail",
       "source": "./",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "strict": true,
       "description": "Eight skills for authoring prompts, composing isolated sub-agents, verifying what comes back without fooling yourself, and closing the session so the next one starts from what happened."
     }
