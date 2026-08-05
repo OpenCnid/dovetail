@@ -1,15 +1,15 @@
 # dovetail
 
-*Seven Claude Code skills that hold together by shape, not by glue.*
+*Eight Claude Code skills that hold together by shape, not by glue.*
 
 [![license](https://img.shields.io/badge/license-CC_BY_4.0-3b7ddd)](LICENSE.md)
-![skills](https://img.shields.io/badge/skills-7-58a6ff)
+![skills](https://img.shields.io/badge/skills-8-58a6ff)
 ![copies](https://img.shields.io/badge/vendored_copies-0-2ea44f)
 ![pinned](https://img.shields.io/badge/pinned_by-git_submodule-9b8cf7)
 
 A dovetail joint holds because of how the pieces are cut. No fasteners, no
 adhesive — the strength *is* the fit. That is the claim this pack makes about
-these seven skills, and it is meant literally: each is independently useful, and
+these eight skills, and it is meant literally: each is independently useful, and
 each one's weak point is another one's subject.
 
 ## The joint
@@ -25,13 +25,17 @@ flowchart LR
     subgraph verify["verify"]
         sp["self-play"] --- bsc["better-skill-creator"]
     end
-    author --> compose --> verify
+    subgraph carry["carry"]
+        us["upsum"]
+    end
+    author --> compose --> verify --> carry
     ss["spark-steering"] -.->|"is a fix even the right move?"| author
 ```
 
-You write instructions for a model, you compose agents to carry them, and you
-check what comes back without deceiving yourself. Every skill here is a
-countermeasure against fluent output that feels like rigor.
+You write instructions for a model, you compose agents to carry them, you check
+what comes back without deceiving yourself, and you close the session so the
+next one starts from what happened rather than from what you remember. Every
+skill here is a countermeasure against fluent output that feels like rigor.
 
 | skill | what it is for |
 |---|---|
@@ -41,21 +45,25 @@ countermeasure against fluent output that feels like rigor.
 | [judge-composition](https://github.com/OpenCnid/judge-composition) | four invariant roles, composed fresh per question. No default cast |
 | [self-play](https://github.com/OpenCnid/self-play) | a clean-room search over a space you have not solved |
 | [better-skill-creator](https://github.com/OpenCnid/better-skill-creator) | author a skill, then find out whether it actually helps |
+| [upsum](https://github.com/OpenCnid/upsum) | what survives a session, decided on purpose rather than by what you happen to remember — **invoke it yourself; it does not auto-fire** |
 | [spark-steering](https://github.com/OpenCnid/spark-steering) | which capability axis is short, before you install a fix that charges rent — **invoke it yourself; it does not auto-fire** |
 
-**Six of the seven trigger on their own. `spark-steering` does not**, by design:
-it carries `disable-model-invocation: true`, because a diagnostic that volunteers
-itself becomes a tax on every turn, which is the failure mode it exists to
-prevent.
+**Six of the eight trigger on their own. `spark-steering` and `upsum` do not**,
+by design: both carry `disable-model-invocation: true`, and both make that trade
+for the same reason. A diagnostic that volunteers itself becomes a tax on every
+turn; a close ceremony that volunteers itself runs on every throwaway session.
+In each case that is the failure mode the skill exists to prevent.
 
 Verified on CLI 2.1.214 by asking a headless session to enumerate its skills:
 **`spark-steering` does not appear in that list at all.** The model cannot see it,
 so asking Claude to use it does not work either — it does not know the skill
 exists. **You invoke it yourself, by typing `/spark-steering`**, which loads it
-normally.
+normally. `upsum` carries the same flag and `/upsum` loads it the same way; that
+one has not been put through the headless check, so treat its absence from the
+list as expected rather than as observed.
 
 A correctly installed pack therefore looks like six skills Claude can reach and
-one it will deny having. That is the intended state, not a broken install.
+two it will deny having. That is the intended state, not a broken install.
 
 ## Install
 
@@ -117,7 +125,10 @@ source wins and the pin gets moved.
   application.
 - **`spark-steering` cites a 373-primitive corpus kept elsewhere**, so its
   `references/` point at material a reader here cannot open.
-- **Nobody has measured that these seven work better together than apart.** The
+- **`upsum`'s summary gradient is a design, not a measured result.** Its own
+  README says so: nobody has run it long enough to know whether spending the
+  words on the newest entries keeps a growing record honest.
+- **Nobody has measured that these eight work better together than apart.** The
   composition is argued from how they cite each other, not demonstrated. Given
   what `self-play` says about entailed outcomes, that comparison would need
   designing carefully rather than running casually.

@@ -6,7 +6,7 @@
 ## What this repo is
 
 A **distribution pack**, not a source of truth. It contains no skill text of its
-own — seven git submodules, each pinned to a commit in its own repository, plus
+own — eight git submodules, each pinned to a commit in its own repository, plus
 a plugin manifest and two scripts.
 
 The consequence that matters: **never edit a skill here.** A change made inside
