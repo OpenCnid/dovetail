@@ -1,0 +1,9 @@
+{
+  "eval_id": 0,
+  "eval_name": "dedupes-rows",
+  "prompt": "remove duplicate rows",
+  "assertions": [
+    "the output is a CSV file",
+    "a header row is present"
+  ]
+}

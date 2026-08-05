@@ -30,14 +30,14 @@ STATIC_ONLY=0
 # Keep in step with SKILLS in install.sh and skills in plugin.json.
 SKILLS=(
   "using-dovetail:skills/using-dovetail"
-  "prompt-engineering:vendor/prompt-engineering/skills/prompt-engineering"
-  "hypershot-protocol:vendor/hypershot-protocol/skills/hypershot-protocol"
-  "subagent-composition:vendor/subagent-composition/skills/subagent-composition"
-  "judge-composition:vendor/judge-composition/skills/judge-composition"
-  "self-play:vendor/self-play/skills/self-play"
-  "better-skill-creator:vendor/better-skill-creator/skills/better-skill-creator"
-  "upsum:vendor/upsum/skills/upsum"
-  "spark-steering:vendor/spark-steering/skills/spark-steering"
+  "prompt-engineering:skills/prompt-engineering"
+  "hypershot-protocol:skills/hypershot-protocol"
+  "subagent-composition:skills/subagent-composition"
+  "judge-composition:skills/judge-composition"
+  "self-play:skills/self-play"
+  "better-skill-creator:skills/better-skill-creator"
+  "upsum:skills/upsum"
+  "spark-steering:skills/spark-steering"
 )
 
 fail=0
@@ -78,9 +78,20 @@ done
 # skill the other does not
 for entry in "${SKILLS[@]}"; do
   path="${entry#*:}"; name="${entry%%:*}"
-  grep -q "$path" .claude-plugin/plugin.json || { note FAIL "$name" "missing from plugin.json"; fail=1; }
-  grep -q "$path" scripts/install.sh          || { note FAIL "$name" "missing from install.sh"; fail=1; }
+  # plugin.json no longer enumerates skills -- it relies on the skills/*/SKILL.md
+  # glob, the way superpowers does. So the check is that the glob actually reaches
+  # this skill, not that a manifest names it.
+  [ -f "$path/SKILL.md" ] && case "$path" in skills/*) ;; *) note FAIL "$name" "outside skills/, so auto-discovery cannot see it"; fail=1 ;; esac
+  grep -q "$path" scripts/install.sh || { note FAIL "$name" "missing from install.sh"; fail=1; }
 done
+
+# The glob is now what plugin.json ships with, so a skill on disk that this list
+# forgets would install silently and never be tested. Count both.
+on_disk="$(ls -d skills/*/ 2>/dev/null | wc -l)"
+if [ "$on_disk" -ne "${#SKILLS[@]}" ]; then
+  note FAIL "inventory" "skills/ holds $on_disk directories, this list names ${#SKILLS[@]}"
+  fail=1
+fi
 
 if [ "$STATIC_ONLY" -eq 1 ]; then
   echo

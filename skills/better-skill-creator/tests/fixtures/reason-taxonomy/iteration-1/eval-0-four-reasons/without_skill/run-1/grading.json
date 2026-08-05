@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Emits a CSV file",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 0 checked"
+    },
+    {
+      "text": "Totals row is last",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 1 checked"
+    },
+    {
+      "text": "Follows the documented ordering of steps",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 2 checked"
+    },
+    {
+      "text": "Handles the malformed row",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 3 checked"
+    },
+    {
+      "text": "Reads well",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 4 checked"
+    },
+    {
+      "text": "Meets the bar",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 5 checked"
+    },
+    {
+      "text": "Is correct",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 6 checked"
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "abstained": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  }
+}

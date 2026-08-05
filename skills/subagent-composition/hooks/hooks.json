@@ -1,0 +1,18 @@
+{
+  "description": "Injects the companion-skill directive when subagent-composition is invoked by name.",
+  "hooks": {
+    "UserPromptExpansion": [
+      {
+        "matcher": "subagent-composition",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Loading composition companions",
+            "timeout": 5,
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptExpansion\",\"additionalContext\":\"Before drafting any sub-agent prompt this session, invoke the prompt-engineering and hypershot-protocol skills via the Skill tool. Both, before the first prompt bytes are written. If either is not installed, note it once and continue without it.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}

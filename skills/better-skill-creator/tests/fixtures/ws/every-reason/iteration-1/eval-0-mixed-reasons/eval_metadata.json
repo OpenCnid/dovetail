@@ -1,0 +1,13 @@
+{
+  "eval_id": 0,
+  "eval_name": "mixed-reasons",
+  "prompt": "produce the report",
+  "assertions": [
+    "expectation 1",
+    "expectation 2",
+    "expectation 3",
+    "expectation 4",
+    "expectation 5",
+    "expectation 6"
+  ]
+}

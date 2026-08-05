@@ -1,0 +1,10 @@
+{
+  "eval_id": 1,
+  "eval_name": "summarises-csv",
+  "prompt": "Summarise sales.csv in two sentences.",
+  "assertions": [
+    "Mentions the total",
+    "Two sentences or fewer",
+    "Follows the documented ordering of steps"
+  ]
+}

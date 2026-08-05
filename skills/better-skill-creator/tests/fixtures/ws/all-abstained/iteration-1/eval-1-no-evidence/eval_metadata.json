@@ -1,0 +1,10 @@
+{
+  "eval_id": 1,
+  "eval_name": "evidence-never-captured",
+  "prompt": "produce the report",
+  "assertions": [
+    "expectation 1",
+    "expectation 2",
+    "expectation 3"
+  ]
+}

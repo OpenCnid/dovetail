@@ -1,5 +1,60 @@
 # Dovetail Release Notes
 
+## v0.3.0 (2026-08-05)
+
+**This repository stopped being a distribution pack and became the source of
+truth for its nine skills.** No submodules, no pins, no `vendor/`, no sync step.
+
+The reason is that the old arrangement was a third pattern nobody else uses.
+`obra/superpowers` — which the tooling here has been following all along — has
+no submodules anywhere. It keeps one product's skills in one repository at
+`skills/<name>/`, and composes *separate* products through a marketplace that
+lists them by URL. Dovetail's eight held together by shape, so they were one
+product wearing eight repositories.
+
+What that bought, and what it cost:
+
+- **A plain `git clone` is now the whole thing.** No `--recurse-submodules`, no
+  fetch step, and no way to end up with a hollow pack — which was a real failure
+  mode with a warning written specifically for it.
+- **`plugin.json` ships no `skills` key.** The loader auto-discovers
+  `skills/*/SKILL.md`, as superpowers does. `install.sh` still enumerates every
+  skill, and `test-skills.sh` now counts that list against the directories on
+  disk, so a skill added to one and not the other fails loudly.
+- **`scripts/sync.sh` is gone.** There are no pins to move.
+- **28 characters of Windows `MAX_PATH` headroom came back**, because the
+  `vendor/<name>/` prefix is gone: `better-skill-creator`'s longest path went
+  from 164 characters to 136, and headroom under a default `~/.claude` from 34
+  to 62.
+- **The cost is the property the pins provided.** A pin either pointed where it
+  pointed or the diff said otherwise, and each source stayed canonical for its
+  own development. `docs/provenance.md` records where every skill came from and
+  the commit it arrived at; the source repositories remain the archive of their
+  own history. What replaces the pin discipline is `scripts/test-skills.sh`,
+  which checks that every skill still loads rather than that every pointer still
+  points.
+
+Two things the move would have broken silently, both caught before it landed:
+
+- **Five of eight skills had no licence inside the skill directory,** relying on
+  a repository root that a monorepo dissolves. `install.sh` copies the skill
+  directory and nothing above it, so those five would have shipped with no
+  licence at all — for CC-BY that is the attribution term, not tidiness. This is
+  the same failure fixed in `better-skill-creator` at 0.2.0, and it was latent in
+  five more places. Every skill now carries its own.
+- **Three `references/` links pointed out of their skill directory** — two in
+  `judge-composition` to its own `docs/`, one in `self-play` to its `AGENTS.md`.
+  Those files are not part of a skill and now live in `docs/<name>/`; the links
+  were recomputed against the new locations and confirmed to resolve. The other
+  twelve escaping links were left exactly as they are: they are cross-repository
+  mirror citations that never resolved here, and `self-play`'s own
+  `references/README.md` records that repairing one is the edit that would end
+  its byte-identity.
+
+Research that is *about* a skill rather than part of it — findings, probe
+harnesses, validation records, design notes — moved to `docs/<name>/` rather
+than being left behind in the archived repositories.
+
 ## v0.2.1 (2026-08-05)
 
 Two documentation fixes upstream, both of the same kind: a claim that was wrong

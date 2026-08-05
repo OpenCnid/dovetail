@@ -1,0 +1,245 @@
+{
+  "primary": "with_skill",
+  "baseline": "without_skill",
+  "metadata": {
+    "skill_name": "reason-taxonomy-demo",
+    "timestamp": "2026-07-31T00:00:00Z",
+    "evals_run": [
+      0
+    ],
+    "runs_per_configuration": 1,
+    "runs_per_configuration_by_config": {
+      "with_skill": 1,
+      "without_skill": 1
+    }
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "four-reason-states",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 1,
+        "failed": 1,
+        "abstained": 5,
+        "total": 7,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Emits a CSV file",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 0 checked"
+        },
+        {
+          "text": "Totals row is last",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "row 1 checked"
+        },
+        {
+          "text": "Follows the documented ordering of steps",
+          "verdict": "abstain",
+          "abstainReason": "jurisdiction",
+          "evidence": "the run kept no transcript, and the ordering is the panel lead's call rather than this seat's"
+        },
+        {
+          "text": "Handles the malformed row",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "outputs/ holds report.csv only; the malformed-row case was never exercised"
+        },
+        {
+          "text": "Reads well",
+          "verdict": "abstain",
+          "abstainReason": "underspecified",
+          "evidence": "“well” is not defined anywhere - no threshold, no comparison, no rubric entry names it"
+        },
+        {
+          "text": "Meets the bar",
+          "verdict": "abstain",
+          "abstainReason": "busy",
+          "evidence": "the file records a reason this page has no meaning for"
+        },
+        {
+          "text": "Is correct",
+          "verdict": "abstain",
+          "abstainReason": null,
+          "evidence": "the file records no reason at all"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "four-reason-states",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "abstained": 0,
+        "total": 7,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Emits a CSV file",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 0 checked"
+        },
+        {
+          "text": "Totals row is last",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 1 checked"
+        },
+        {
+          "text": "Follows the documented ordering of steps",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 2 checked"
+        },
+        {
+          "text": "Handles the malformed row",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 3 checked"
+        },
+        {
+          "text": "Reads well",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 4 checked"
+        },
+        {
+          "text": "Meets the bar",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 5 checked"
+        },
+        {
+          "text": "Is correct",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 6 checked"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.5,
+        "stddev": null,
+        "min": 0.5,
+        "max": 0.5,
+        "n": 1,
+        "missing": 0
+      },
+      "time_seconds": {
+        "mean": 2.0,
+        "stddev": null,
+        "min": 2.0,
+        "max": 2.0,
+        "n": 1,
+        "missing": 0
+      },
+      "tokens": {
+        "mean": 100.0,
+        "stddev": null,
+        "min": 100,
+        "max": 100,
+        "n": 1,
+        "missing": 0
+      },
+      "abstention": {
+        "abstained": 5,
+        "graded": 2,
+        "total": 7,
+        "rate": 0.7143,
+        "reasons": {
+          "jurisdiction": 1,
+          "evidence": 1,
+          "underspecified": 1,
+          "untyped": 2
+        },
+        "runs": 1,
+        "runs_without_pass_rate": 0
+      },
+      "runs": 1
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": null,
+        "min": 1.0,
+        "max": 1.0,
+        "n": 1,
+        "missing": 0
+      },
+      "time_seconds": {
+        "mean": 2.0,
+        "stddev": null,
+        "min": 2.0,
+        "max": 2.0,
+        "n": 1,
+        "missing": 0
+      },
+      "tokens": {
+        "mean": 100.0,
+        "stddev": null,
+        "min": 100,
+        "max": 100,
+        "n": 1,
+        "missing": 0
+      },
+      "abstention": {
+        "abstained": 0,
+        "graded": 7,
+        "total": 7,
+        "rate": 0.0,
+        "reasons": {
+          "jurisdiction": 0,
+          "evidence": 0,
+          "underspecified": 0,
+          "untyped": 0
+        },
+        "runs": 1,
+        "runs_without_pass_rate": 0
+      },
+      "runs": 1
+    },
+    "delta": {
+      "pass_rate": {
+        "value": -0.5,
+        "formatted": "-0.50",
+        "polarity": "higher_is_better",
+        "better": false
+      },
+      "time_seconds": {
+        "value": 0.0,
+        "formatted": "+0.0",
+        "polarity": "lower_is_better",
+        "better": null
+      },
+      "tokens": {
+        "value": 0.0,
+        "formatted": "+0",
+        "polarity": "lower_is_better",
+        "better": null
+      }
+    }
+  },
+  "exclusions": [],
+  "layout_warnings": [],
+  "notes": []
+}

@@ -1,0 +1,77 @@
+{
+  "expectations": [
+    {
+      "text": "Check 1",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 0 checked"
+    },
+    {
+      "text": "Check 2",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 1 checked"
+    },
+    {
+      "text": "Check 3",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 2 checked"
+    },
+    {
+      "text": "Check 4",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 3 checked"
+    },
+    {
+      "text": "Check 5",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 4 checked"
+    },
+    {
+      "text": "Check 6",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 5 checked"
+    },
+    {
+      "text": "Check 7",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 6 checked"
+    },
+    {
+      "text": "Check 8",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 7 checked"
+    },
+    {
+      "text": "Check 9",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 8 checked"
+    },
+    {
+      "text": "Check 10",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 9 checked"
+    },
+    {
+      "text": "Check 11",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 10 checked"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 0,
+    "abstained": 9,
+    "total": 11,
+    "pass_rate": 1.0
+  }
+}

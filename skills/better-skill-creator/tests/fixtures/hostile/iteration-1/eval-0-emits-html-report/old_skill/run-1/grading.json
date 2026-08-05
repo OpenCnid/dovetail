@@ -1,0 +1,71 @@
+{
+  "expectations": [
+    {
+      "text": "The output is a CSV file",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 0 checked"
+    },
+    {
+      "text": "Header row present",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 1 checked"
+    },
+    {
+      "text": "Totals row is last",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 2 checked"
+    },
+    {
+      "text": "Currency is formatted",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 3 checked"
+    },
+    {
+      "text": "No blank rows",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 4 checked"
+    },
+    {
+      "text": "Dates are ISO-8601",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 5 checked"
+    },
+    {
+      "text": "Encoding is UTF-8",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 6 checked"
+    },
+    {
+      "text": "File is under 1 MB",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 7 checked"
+    },
+    {
+      "text": "Column order matches the brief",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 8 checked"
+    },
+    {
+      "text": "Footer note is present",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 9 checked"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 8,
+    "abstained": 0,
+    "total": 10,
+    "pass_rate": 0.2
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "eval_id": 0,
+  "eval_name": "every-check-abstained",
+  "prompt": "Task 0.",
+  "assertions": [
+    "Follows the documented ordering of steps",
+    "Handles the malformed row"
+  ]
+}

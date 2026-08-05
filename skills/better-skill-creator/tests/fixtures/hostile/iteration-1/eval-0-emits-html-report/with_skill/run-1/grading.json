@@ -1,0 +1,70 @@
+{
+  "expectations": [
+    {
+      "text": "Output is a CSV file",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "The grader quoted the output: x\" onmouseover=\"window.__ATTR_FIRED=1\" data-z=\""
+    },
+    {
+      "text": "Header row present",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "Saw a literal </script> in the emitted markup, which is fine here."
+    },
+    {
+      "text": "Totals row is last",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "Итог: 42 — 日本語テキスト — café naïve"
+    },
+    {
+      "text": "Currency is formatted",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 3 checked"
+    },
+    {
+      "text": "No blank rows",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 4 checked"
+    },
+    {
+      "text": "Dates are ISO-8601",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 5 checked"
+    },
+    {
+      "text": "Encoding is UTF-8",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 6 checked"
+    },
+    {
+      "text": "File is under 1 MB",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 7 checked"
+    },
+    {
+      "text": "Column order matches the brief",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 8 checked"
+    },
+    {
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "no text field was written for this check"
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 5,
+    "abstained": 0,
+    "total": 10,
+    "pass_rate": 0.5
+  }
+}

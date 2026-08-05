@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "expectation 1",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "output matched the expectation"
+    },
+    {
+      "text": "expectation 2",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "output matched the expectation"
+    },
+    {
+      "text": "expectation 3",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "output matched the expectation"
+    },
+    {
+      "text": "expectation 4",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "output matched the expectation"
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "abstained": 0,
+    "total": 4,
+    "pass_rate": 1.0
+  }
+}

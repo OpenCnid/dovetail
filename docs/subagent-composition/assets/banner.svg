@@ -1,0 +1,57 @@
+<svg viewBox="0 0 880 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="subagent-composition: four kinds of context bounce off a boundary, only the prompt crosses into the sub-agent, and only the final message returns">
+  <defs>
+    <linearGradient id="ramp" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="50%" stop-color="#9b8cf7"/>
+      <stop offset="100%" stop-color="#ef6fd0"/>
+    </linearGradient>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="tipdim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <text x="440" y="46" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="34" font-weight="700" fill="url(#ramp)">subagent-composition</text>
+  <text x="440" y="74" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="12.5" fill="#8b949e">one page crosses &#183; one message returns &#183; everything else stays home</text>
+
+  <!-- the boundary -->
+  <line x1="470" y1="100" x2="470" y2="252" stroke="#8b949e" stroke-opacity="0.7" stroke-width="2" stroke-dasharray="5 5"/>
+  <text x="470" y="94" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#8b949e" letter-spacing="1.5">THE BOUNDARY</text>
+
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="12" fill="#8b949e">
+    <text x="250" y="124" text-anchor="end">conversation history</text>
+    <text x="250" y="154" text-anchor="end">your system prompt</text>
+    <text x="250" y="184" text-anchor="end">auto-memory</text>
+    <text x="250" y="214" text-anchor="end">loaded skills</text>
+  </g>
+
+  <!-- blocked: four short arrows that die at the wall -->
+  <g stroke="#8b949e" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#tipdim)">
+    <line x1="266" y1="120" x2="424" y2="120"/>
+    <line x1="266" y1="150" x2="424" y2="150"/>
+    <line x1="266" y1="180" x2="424" y2="180"/>
+    <line x1="266" y1="210" x2="424" y2="210"/>
+  </g>
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="13" fill="#ef6fd0" text-anchor="middle" opacity="0.85">
+    <text x="447" y="125">&#10005;</text>
+    <text x="447" y="155">&#10005;</text>
+    <text x="447" y="185">&#10005;</text>
+    <text x="447" y="215">&#10005;</text>
+  </g>
+
+  <!-- the one thing that crosses -->
+  <text x="250" y="244" text-anchor="end" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="12" font-weight="700" fill="#58a6ff">the prompt</text>
+  <line x1="266" y1="240" x2="614" y2="240" stroke="#58a6ff" stroke-width="2" marker-end="url(#tip)">
+    <animate attributeName="stroke-opacity" values="0.25;1" dur="0.9s" begin="0s" fill="freeze"/>
+  </line>
+
+  <!-- the sub-agent -->
+  <rect x="622" y="212" width="216" height="56" rx="10" fill="#58a6ff" fill-opacity="0.07" stroke="#58a6ff" stroke-opacity="0.55"/>
+  <text x="730" y="245" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="13" fill="#58a6ff">sub-agent</text>
+
+  <!-- the narrow return channel -->
+  <path d="M 730 268 L 730 300 L 150 300" fill="none" stroke="#9b8cf7" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#tipdim)" stroke-opacity="0.8"/>
+  <text x="440" y="318" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="11" fill="#9b8cf7">final message only &#8212; everything else is discarded unread</text>
+</svg>

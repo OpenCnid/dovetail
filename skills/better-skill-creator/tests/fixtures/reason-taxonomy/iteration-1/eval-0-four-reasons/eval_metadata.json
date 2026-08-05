@@ -1,0 +1,14 @@
+{
+  "eval_id": 0,
+  "eval_name": "four-reason-states",
+  "prompt": "Produce the report.",
+  "assertions": [
+    "Emits a CSV file",
+    "Totals row is last",
+    "Follows the documented ordering of steps",
+    "Handles the malformed row",
+    "Reads well",
+    "Meets the bar",
+    "Is correct"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "eval_id": 0,
+  "eval_name": "swapped-order",
+  "prompt": "Emit the sales table.",
+  "assertions": [
+    "Header row present",
+    "Totals row is last",
+    "Currency is formatted"
+  ]
+}

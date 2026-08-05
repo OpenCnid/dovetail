@@ -1,0 +1,23 @@
+{
+  "expectations": [
+    {
+      "text": "Follows the documented ordering of steps",
+      "verdict": "abstain",
+      "abstainReason": "jurisdiction",
+      "evidence": "no transcript_path was supplied; outputs/ holds report.csv only"
+    },
+    {
+      "text": "Handles the malformed row",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "the malformed-row case was not exercised by this run"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 0,
+    "abstained": 2,
+    "total": 2,
+    "pass_rate": null
+  }
+}

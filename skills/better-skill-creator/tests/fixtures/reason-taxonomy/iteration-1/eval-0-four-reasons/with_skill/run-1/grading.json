@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Emits a CSV file",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 0 checked"
+    },
+    {
+      "text": "Totals row is last",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "row 1 checked"
+    },
+    {
+      "text": "Follows the documented ordering of steps",
+      "verdict": "abstain",
+      "abstainReason": "jurisdiction",
+      "evidence": "the run kept no transcript, and the ordering is the panel lead's call rather than this seat's"
+    },
+    {
+      "text": "Handles the malformed row",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "outputs/ holds report.csv only; the malformed-row case was never exercised"
+    },
+    {
+      "text": "Reads well",
+      "verdict": "abstain",
+      "abstainReason": "underspecified",
+      "evidence": "“well” is not defined anywhere - no threshold, no comparison, no rubric entry names it"
+    },
+    {
+      "text": "Meets the bar",
+      "verdict": "abstain",
+      "abstainReason": "busy",
+      "evidence": "the file records a reason this page has no meaning for"
+    },
+    {
+      "text": "Is correct",
+      "verdict": "abstain",
+      "abstainReason": null,
+      "evidence": "the file records no reason at all"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 1,
+    "abstained": 5,
+    "total": 7,
+    "pass_rate": 0.5
+  }
+}

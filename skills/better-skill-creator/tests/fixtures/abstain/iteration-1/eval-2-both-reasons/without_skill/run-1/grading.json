@@ -1,0 +1,23 @@
+{
+  "expectations": [
+    {
+      "text": "Uses the house date format",
+      "verdict": "abstain",
+      "abstainReason": "evidence",
+      "evidence": "row 0 checked"
+    },
+    {
+      "text": "Was written by the skill",
+      "verdict": "abstain",
+      "abstainReason": "jurisdiction",
+      "evidence": "row 1 checked"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 0,
+    "abstained": 2,
+    "total": 2,
+    "pass_rate": null
+  }
+}

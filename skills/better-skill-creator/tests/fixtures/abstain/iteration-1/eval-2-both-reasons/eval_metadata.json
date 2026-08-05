@@ -1,0 +1,9 @@
+{
+  "eval_id": 2,
+  "eval_name": "both-reasons",
+  "prompt": "Task 2.",
+  "assertions": [
+    "Uses the house date format",
+    "Was written by the skill"
+  ]
+}

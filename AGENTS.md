@@ -5,21 +5,23 @@
 
 ## What this repo is
 
-A **distribution pack**, not a source of truth. Eight git submodules, each
-pinned to a commit in its own repository, plus a plugin manifest, two scripts,
-a `SessionStart` hook, and exactly one skill of its own.
+**The source of truth for nine skills**, in one repository, plus a plugin
+manifest, a `SessionStart` hook, and the scripts that install and test them.
 
-The consequence that matters: **never edit a vendored skill here.** A change
-made inside `vendor/<name>/` is a change in a detached submodule checkout, and
-it will be lost the moment a pin moves. Fix it in the source repository, then
-move the pin.
+It did not used to be. Until `0.3.0` this was a distribution pack: eight git
+submodules pinned to commits in eight repositories, which it shipped without
+ever hosting. That arrangement is gone — no submodules, no pins, no `vendor/`,
+and no sync step. **Edit skills here.** `docs/provenance.md` records where each
+one came from and the commit it arrived at; the source repositories remain as
+the archive of their own history.
 
-**The one exception is `skills/using-dovetail/`,** and it is a real one. It
-carries the companion rule and the notice that `spark-steering` and `upsum` are
-invisible to the model — content that is *about the pack* rather than about any
-one skill, and that no source repository is in a position to write, because none
-of them knows it will be packaged as `dovetail`. It is authored here, under the
-gate below, like any other instruction bytes.
+The rule that replaced "never edit a vendored skill" is narrower and only
+applies to a subset of files: **never edit a mirror.** Several skills carry
+`references/` files that are byte-pinned copies of documents from elsewhere,
+with their blob SHAs recorded in the neighbouring `README.md`. Their internal
+links point at the originating layout and do not resolve here — that is
+correct, and repairing one is exactly the edit that ends its byte-identity and
+breaks the verification the recording exists for.
 
 ## The gate binds work in this repository
 
@@ -37,73 +39,75 @@ the body lands as a separate message, so name a section heading you can actually
 see in this session's context before citing either skill; if none is there,
 invoke it again.
 
-Both skills are pinned in this pack. Reading a pinned copy does not open the
-gate; installing it so it can be invoked does.
+Both skills live in `skills/` here. Reading a copy does not open the gate;
+installing it so it can be invoked does.
 
 ## Working here
 
-- **Moving a pin ships new instructions to everyone who installs the pack.**
-  Read `git diff --submodule=log` before committing a bump. `scripts/sync.sh`
-  deliberately does not commit for you.
-- **The layout rule, and the exception that no longer exists.** A skill
-  directory is *exactly what should land in `~/.claude/skills/<name>/`*. Every
-  source now keeps its skill at `skills/<name>/`, so copying that one directory
-  carries the skill and nothing else, and each repository is installable as a
-  plugin in its own right because the loader's `skills/*/SKILL.md` glob finds it.
+- **A skill directory is exactly what should land in `~/.claude/skills/<name>/`.**
+  Nothing else goes in it, and nothing it needs stays out. That includes the
+  licence: `install.sh` copies the directory and nothing above it, so a skill
+  leaning on the root `LICENSE.md` ships with no licence at all. Every skill here
+  carries its own, which is not tidiness — for a CC-BY or Apache skill it is the
+  attribution term.
 
-  Two things used to complicate this and both are gone: seven sources held the
-  skill at `.claude/skills/<name>/`, and `better-skill-creator` was a standing
-  exception whose whole repository was the skill directory. Its `scripts/`,
-  `references/`, `agents/` and `tests/` are still part of the skill — they moved
-  with it rather than being left behind, decided per item on evidence of what
-  actually reads them.
-
-  One consequence worth keeping in mind when a skill directory is defined: a
-  licence and notice must live *inside* it, not only at the repository root.
-  Both the copy install and `better-skill-creator`'s own packager build from the
-  skill directory, so anything outside it is simply absent from what ships —
-  which for an Apache-licensed skill is a licensing problem, not a tidiness one.
-
-  Both `plugin.json` and `install.sh` enumerate every path explicitly. If you add
-  a skill, add its path to both — a glob that silently matches nothing installs a
-  hollow pack that looks fine.
+  Research that is *about* a skill rather than part of it lives in
+  `docs/<name>/`: findings, probe harnesses, validation records, design notes.
+  If a skill's `references/` cites one of those, the link crosses out of the
+  skill directory and will not survive an install — check it resolves and expect
+  it to be read from the repository rather than from a user's machine.
+- **`plugin.json` ships no `skills` key.** The loader auto-discovers
+  `skills/*/SKILL.md`, the way `obra/superpowers` does. `install.sh` still
+  enumerates every skill explicitly, and `test-skills.sh` counts its list against
+  the directories on disk — so a skill added to one and not the other fails
+  loudly instead of installing on one route and not the other.
 - **A skill's own hooks do not fire on the plugin route.** A nested
   `.claude-plugin/plugin.json` is honoured only where the directory is a plugin
   in its own right — that is the `install.sh` route, where each skill lands in
-  `~/.claude/skills/<name>/` and auto-loads as `<name>@skills-dir`. Mounted as
-  components of this pack, those manifests are ignored and their hooks never
+  `~/.claude/skills/<name>/` and auto-loads as `<name>@skills-dir`. Loaded as
+  components of this plugin, those manifests are ignored and their hooks never
   register. Fixing the matcher does not help; the namespaced `command_name` is a
   symptom, not the cause.
 
   So **pack-wide behaviour belongs in `hooks/hooks.json` at this root**, which is
   where the `SessionStart` injection of `using-dovetail` lives. Probed
-  arm-by-arm on CLI 2.1.214, Windows 10, with negative controls; the pack route
-  was exercised through both `--plugin-dir` and a real `marketplace add` +
-  `install`. What was *not* checked is whether the injected context changes what
-  the model then invokes — that needs an authenticated session, and the scratch
-  config used for the probes is not logged in.
-- **Claims in the README carry their evidence state.** The plugin install route
-  is marked unverified because nobody has run it on a fresh machine. If you
-  verify it, replace the caveat with what you observed and on which version. Do
-  not quietly delete it.
+  arm-by-arm on CLI 2.1.214, Windows 10, with negative controls, through both
+  `--plugin-dir` and a real `marketplace add` + `install`. What was *not* checked
+  is whether the injected context changes what the model then invokes — that
+  needs an authenticated session, and the scratch config used for the probes is
+  not logged in.
+- **A skill that loads is not a skill that works.** `scripts/test-skills.sh`
+  proves each body reaches the session and cannot prove the model acts on it.
+  Keep that distinction in anything you write about it.
+- **Claims carry their evidence state.** Where a README or a comment records a
+  measurement, record when it was taken, because a bare number cannot go stale
+  loudly — a character count here was wrong by 759 for as long as nobody
+  re-ran the command printed three lines above it. If you verify something
+  marked unverified, replace the caveat with what you observed and on which
+  version. Do not quietly delete it.
 - **Attribution is not decoration.** The prompt-engineering toolkit and the
   hypershot technique are Matthew Murphy's. Any document here that teaches the
-  technique credits him.
+  technique credits him. The `run-hook.cmd` polyglot and the entry-skill
+  injection pattern are `obra/superpowers`'.
 
-## Adding a skill to the pack
+## Adding a skill
 
-1. Publish it as its own repository first. This pack distributes; it does not
-   host. The sole exception is a skill *about the pack itself*, which no source
-   repository can write — see `using-dovetail` above. If you think you have a
-   second one, you probably have a skill that belongs upstream.
-2. `git submodule add https://github.com/OpenCnid/<name>.git vendor/<name>`
-3. Add its `SKILL.md` directory to `skills` in `.claude-plugin/plugin.json`.
-4. Add the same path to `SKILLS` in `scripts/install.sh`.
-5. Add a row to the README table, and say what it is *for* rather than what it is.
-6. Run `bash scripts/install.sh --dry-run` and confirm the new skill appears.
+1. Create `skills/<name>/` with a `SKILL.md` whose frontmatter `name` matches the
+   directory, and put a licence in it.
+2. Add the same path to `SKILLS` in `scripts/install.sh` **and** in
+   `scripts/test-skills.sh`.
+3. Add a row to the README table, and say what it is *for* rather than what it is.
+4. Run `bash scripts/test-skills.sh`. The inventory check fails if `skills/` and
+   the lists disagree, and the live layer fails if the body never reaches a
+   session.
 
-## When something here and a source repo disagree
+Nothing needs to be published elsewhere first, and nothing needs a pin.
 
-The source wins and the pin moves. This repository never gets to be right about
-a skill's contents — it only gets to be right about *which commit* of that skill
-it ships.
+## Releasing
+
+`.version-bump.json` names every place the version is written and
+`scripts/bump-version.sh` moves them together; `--check` exits non-zero when they
+disagree. This is load-bearing rather than tidy: the marketplace entry carries
+`strict: true`, and `claude plugin tag` refuses to tag when `plugin.json` and the
+enclosing marketplace entry disagree. Add an entry to `RELEASE-NOTES.md`, then
+tag from a commit that is already on `main`.

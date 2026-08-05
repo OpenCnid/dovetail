@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    The skill name is NOT substituted here. A <title> is RCDATA: a "</title>"
+    anywhere in the value ends the element and everything after it becomes live
+    markup in <head>. A name containing markup fired an injected handler twice
+    over from this one line. The title is set from JavaScript, after the value
+    has been through an inert <template> (see the data block below).
+  -->
+  <title>Eval Set Review</title>
+  <!--
+    No webfont CDN: this page is opened locally, often offline, and the remote
+    fonts silently fell back to the system serif anyway.
+  -->
+  <style>
+    :root {
+      --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      --font-serif: 'Lora', Georgia, 'Times New Roman', serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font-serif); background: #faf9f5; padding: 2rem; color: #141413; }
+    h1 { font-family: var(--font-sans); margin-bottom: 0.5rem; font-size: 1.5rem; }
+    .description { color: #b0aea5; margin-bottom: 1rem; font-style: italic; max-width: 900px; }
+    .instructions { max-width: 900px; margin-bottom: 1.5rem; line-height: 1.6; font-size: 0.9375rem; }
+    .controls { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+    .btn { font-family: var(--font-sans); padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+    .btn-add { background: #6a9bcc; color: white; }
+    .btn-add:hover { background: #5889b8; }
+    .btn-export { background: #d97757; color: white; }
+    .btn-export:hover { background: #c4613f; }
+    table { width: 100%; max-width: 1100px; border-collapse: collapse; background: white; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    th { font-family: var(--font-sans); background: #141413; color: #faf9f5; padding: 0.75rem 1rem; text-align: left; font-size: 0.875rem; }
+    td { padding: 0.75rem 1rem; border-bottom: 1px solid #e8e6dc; vertical-align: top; }
+    tr:nth-child(even) td { background: #faf9f5; }
+    tr:hover td { background: #f3f1ea; }
+    .section-header td { background: #e8e6dc; font-family: var(--font-sans); font-weight: 500; font-size: 0.8rem; color: #141413; text-transform: uppercase; letter-spacing: 0.05em; }
+    .query-input { width: 100%; padding: 0.4rem; border: 1px solid #e8e6dc; border-radius: 4px; font-size: 0.875rem; font-family: var(--font-serif); resize: vertical; min-height: 60px; }
+    .query-input:focus { outline: none; border-color: #d97757; box-shadow: 0 0 0 2px rgba(217,119,87,0.15); }
+    .toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider { position: absolute; inset: 0; background: #b0aea5; border-radius: 24px; cursor: pointer; transition: 0.2s; }
+    .toggle .slider::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
+    .toggle input:checked + .slider { background: #d97757; }
+    .toggle input:checked + .slider::before { transform: translateX(20px); }
+    .btn-delete { background: #c44; color: white; padding: 0.3rem 0.6rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-family: var(--font-sans); }
+    .btn-delete:hover { background: #a33; }
+    .summary { margin-top: 1rem; color: #b0aea5; font-size: 0.875rem; }
+    .recovery {
+      max-width: 900px; background: #fbf3e0; border: 1px solid #a8791f; color: #6b4c11;
+      border-radius: 6px; padding: 1rem 1.25rem; line-height: 1.6; font-size: 0.9375rem;
+    }
+    .recovery h2 { font-family: var(--font-sans); font-size: 1.05rem; margin-bottom: 0.5rem; }
+    .recovery textarea {
+      width: 100%; min-height: 140px; margin-top: 0.75rem; padding: 0.5rem;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, Menlo, monospace; font-size: 0.8125rem;
+      border: 1px solid #d8c48f; border-radius: 4px;
+    }
+    .recovery .btn { margin-top: 0.5rem; background: #a8791f; color: white; }
+    .recovery code { background: rgba(0,0,0,0.06); padding: 0 0.25rem; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <!--
+    Both spans are filled from JavaScript with textContent. No caller-supplied
+    value is substituted into body markup anywhere on this page; see the data
+    block below for where the two values actually arrive.
+  -->
+  <h1>Eval Set Review: <span id="skill-name"></span></h1>
+  <p class="description">Current description: <span id="skill-desc"></span></p>
+
+  <p class="instructions">
+    Below are made-up messages someone might send to Claude. For each one, say whether Claude
+    <em>should</em> reach for this skill (toggle on) or should handle it some other way (toggle off).
+    Reword anything that doesn't sound like something you'd actually type, add your own with
+    <strong>+ Add Query</strong>, and delete any that don't fit. When you're happy with the list, click
+    <strong>Export Eval Set</strong> &mdash; it saves a file to your downloads folder, and you can tell
+    Claude where to find it.
+  </p>
+
+  <div id="main-ui">
+    <div class="controls">
+      <button class="btn btn-add" onclick="addRow()">+ Add Query</button>
+      <button class="btn btn-export" onclick="exportEvalSet()">Export Eval Set</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:65%">Query</th>
+          <th style="width:18%">Should Trigger</th>
+          <th style="width:10%">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="eval-body"></tbody>
+    </table>
+
+    <p class="summary" id="summary"></p>
+  </div>
+
+  <!--
+    ================= DATA BLOCK — READ BEFORE SUBSTITUTING =================
+
+    THIS PAGE HAS THREE PLACEHOLDERS. ALL THREE CARRY CALLER-SUPPLIED TEXT AND
+    ALL THREE NEED ESCAPING. There is no "safe" one.
+
+      __EVAL_DATA_PLACEHOLDER__         -> JavaScript string/array literal
+      __SKILL_NAME_PLACEHOLDER__        -> HTML text (inside a <template>)
+      __SKILL_DESCRIPTION_PLACEHOLDER__ -> HTML text (inside a <template>)
+
+    A skill *description* is the single field most likely to contain "<", ">"
+    or a quote, and reviewing descriptions is the entire purpose of this page.
+    An earlier version of this file substituted the name and the description
+    straight into <title> and into body markup with no escaping and no comment
+    saying they needed any, while the data placeholder three lines away had
+    both. Both fired injected event handlers.
+
+    ---- 1. The data placeholder: escape as a JavaScript string literal -------
+
+    Whatever replaces __EVAL_DATA_PLACEHOLDER__ lands inside a <script>
+    element. HTML tokenizes script contents by scanning for the literal
+    "</script"; JSON escaping knows nothing about that. So a query containing
+    "</script>" — and SKILL.md asks for realistic queries with file paths,
+    URLs and column names, which is how one gets there — closes this element
+    early, leaves EVAL_DATA_RAW undefined, and dumps the rest of the payload
+    into the page as text.
+
+    Escape the JSON for THIS context before substituting it. In Python:
+
+        import json
+        BACKSLASH = chr(92)
+        payload = json.dumps(eval_set)
+        for ch in ("<", ">", "&"):
+            payload = payload.replace(ch, BACKSLASH + "u%04x" % ord(ch))
+        html = template.replace("__EVAL_DATA_PLACEHOLDER__", payload)
+
+    i.e. rewrite each of "<", ">" and "&" as a backslash-u escape of its
+    code point -- 003c, 003e and 0026. JavaScript decodes those back to the
+    original characters inside a string literal, so the data the page sees is
+    byte-identical, and the HTML tokenizer never sees a tag.
+
+    eval-viewer/generate_review.py does exactly this in to_script_literal();
+    that function is the reference implementation.
+
+    ---- 2. The name and description: escape as HTML text --------------------
+
+        import html as html_mod
+        page = page.replace("__SKILL_NAME_PLACEHOLDER__",
+                            html_mod.escape(skill_name, quote=True))
+        page = page.replace("__SKILL_DESCRIPTION_PLACEHOLDER__",
+                            html_mod.escape(description, quote=True))
+
+    html.escape(..., quote=True) covers & < > " '. Nothing else is needed,
+    because neither value reaches an attribute, a URL, or a script literal.
+
+    ---- 3. What this file does so a mistake cannot execute ------------------
+
+    The name and the description land inside NESTED <template> elements.
+    Template contents are parsed into an inert document with no browsing
+    context: scripts inside do not run and images inside are never fetched, so
+    an unescaped "<img src=x onerror=...>" in either value is DEAD MARKUP
+    rather than a fired handler. The page then lifts the text back out with
+    .textContent (which also decodes the entities a correctly-escaped caller
+    produced, so both spellings render the same string) and assigns it with
+    .textContent again.
+
+    The nesting is why there are two levels. A value containing a literal
+    template end tag closes its own template early — but the debris then lands
+    in the OUTER template's contents, which are inert as well. Reaching live
+    DOM from here takes two consecutive template end tags in one value, which
+    is a payload aimed at this file rather than anything a skill description
+    plausibly contains. It is not a proof of impossibility, and the escaping
+    above is still the actual requirement.
+
+    If a template turns out to hold elements, the substitution was not escaped
+    — the page says so, in a banner, at the top, rather than quietly rendering
+    the attacker's markup or silently dropping the reader's own angle brackets.
+
+    The wrapper div is hidden so that any debris from a broken substitution is
+    not rendered as body text, and it is removed before anything else runs.
+    =========================================================================
+  -->
+  <div id="data-block" hidden>
+    <script>
+      var EVAL_DATA_RAW = __EVAL_DATA_PLACEHOLDER__;
+    </script>
+    <template id="skill-meta"><template id="skill-name-src">__SKILL_NAME_PLACEHOLDER__</template><template id="skill-description-src">__SKILL_DESCRIPTION_PLACEHOLDER__</template></template>
+  </div>
+
+  <!--
+    Everything below is in a SEPARATE script element on purpose. If the block
+    above is destroyed by an unescaped "</script>", this one still runs and can
+    say so, instead of the reader getting a silently empty table.
+  -->
+  <script>
+    var evalItems = [];
+
+    // Escapes for both HTML text nodes and quoted attributes. The old version
+    // round-tripped through textContent/innerHTML, which covers & < > and not
+    // " or ', so any value reaching an attribute could close it.
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return '';
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function render() {
+      const tbody = document.getElementById('eval-body');
+      tbody.innerHTML = '';
+
+      // Display order groups should-trigger first. The underlying index
+      // (origIdx) travels with each row so every handler edits the item the
+      // reader is actually looking at.
+      const sorted = evalItems
+        .map((item, origIdx) => ({ item, origIdx }))
+        .sort((a, b) => (b.item.should_trigger ? 1 : 0) - (a.item.should_trigger ? 1 : 0));
+
+      let lastGroup = null;
+      sorted.forEach(entry => {
+        const item = entry.item;
+        const group = item.should_trigger ? 'trigger' : 'no-trigger';
+        if (group !== lastGroup) {
+          const headerRow = document.createElement('tr');
+          headerRow.className = 'section-header';
+          const cell = document.createElement('td');
+          cell.colSpan = 3;
+          cell.textContent = item.should_trigger ? 'Should Trigger' : 'Should NOT Trigger';
+          headerRow.appendChild(cell);
+          tbody.appendChild(headerRow);
+          lastGroup = group;
+        }
+
+        const idx = entry.origIdx;
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td><textarea class="query-input" data-idx="' + escapeHtml(idx) + '"></textarea></td>'
+          + '<td>'
+          + '<label class="toggle">'
+          + '<input type="checkbox" data-idx="' + escapeHtml(idx) + '"' + (item.should_trigger ? ' checked' : '') + '>'
+          + '<span class="slider"></span>'
+          + '</label>'
+          + '<span style="margin-left:8px;font-size:0.8rem;color:#b0aea5">'
+          + (item.should_trigger ? 'Yes' : 'No') + '</span>'
+          + '</td>'
+          + '<td><button class="btn-delete" data-idx="' + escapeHtml(idx) + '">Delete</button></td>';
+        // Assigned as a property, never as markup, so no query text can
+        // become part of the page structure.
+        tr.querySelector('textarea').value = item.query;
+        tbody.appendChild(tr);
+      });
+      updateSummary();
+    }
+
+    // One delegated listener per event type: no query text is ever spliced
+    // into an inline handler attribute.
+    document.getElementById('eval-body').addEventListener('change', (e) => {
+      const idx = Number(e.target.dataset.idx);
+      if (Number.isNaN(idx) || !evalItems[idx]) return;
+      if (e.target.matches('textarea.query-input')) {
+        evalItems[idx].query = e.target.value;
+        updateSummary();
+      } else if (e.target.matches('input[type="checkbox"]')) {
+        evalItems[idx].should_trigger = e.target.checked;
+        render();
+      }
+    });
+
+    document.getElementById('eval-body').addEventListener('click', (e) => {
+      if (!e.target.matches('button.btn-delete')) return;
+      const idx = Number(e.target.dataset.idx);
+      if (Number.isNaN(idx) || !evalItems[idx]) return;
+      evalItems.splice(idx, 1);
+      render();
+    });
+
+    function addRow() {
+      evalItems.push({ query: '', should_trigger: true });
+      const newIdx = evalItems.length - 1;
+      render();
+      // Focus the row we just added, by identity. Focusing the LAST textarea
+      // in the DOM sent the cursor to an existing should-NOT-trigger row —
+      // the reader then overwrote a real negative test case, their new query
+      // was mislabelled, and the empty row they thought they added was
+      // dropped by exportEvalSet.
+      const el = document.querySelector('.query-input[data-idx="' + newIdx + '"]');
+      if (el) el.focus();
+    }
+
+    function updateSummary() {
+      const trigger = evalItems.filter(i => i.should_trigger).length;
+      const noTrigger = evalItems.filter(i => !i.should_trigger).length;
+      document.getElementById('summary').textContent =
+        evalItems.length + ' queries total: ' + trigger + ' should trigger, '
+        + noTrigger + ' should not trigger';
+    }
+
+    function exportEvalSet() {
+      const valid = evalItems.filter(i => i.query.trim() !== '');
+      const data = valid.map(i => ({ query: i.query.trim(), should_trigger: i.should_trigger }));
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'eval_set.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function loadEvalSet(data) {
+      if (!Array.isArray(data)) throw new Error('Expected a JSON array of {query, should_trigger} objects.');
+      evalItems = data.map(item => ({
+        query: item && item.query != null ? String(item.query) : '',
+        should_trigger: !!(item && item.should_trigger),
+      }));
+      render();
+    }
+
+    function showRecovery(detail) {
+      document.getElementById('main-ui').hidden = true;
+      const box = document.createElement('div');
+      box.className = 'recovery';
+      box.innerHTML =
+        '<h2>The list of queries could not be loaded</h2>'
+        + '<p>The page was built with data that contained characters the browser read as page '
+        + 'structure, so the list never arrived. Nothing you did caused this.</p>'
+        + '<p><strong>What to do:</strong> tell Claude &ldquo;the eval set review page came up empty&rdquo;. '
+        + 'If you have the eval set JSON to hand, you can paste it below instead.</p>'
+        + '<textarea id="paste-json" placeholder="[{&quot;query&quot;: &quot;...&quot;, &quot;should_trigger&quot;: true}]"></textarea>'
+        + '<div><button class="btn" id="paste-load">Load these queries</button></div>'
+        + '<p id="paste-error" style="margin-top:0.5rem;"></p>';
+      document.body.appendChild(box);
+      document.getElementById('paste-error').textContent = detail || '';
+      document.getElementById('paste-load').addEventListener('click', () => {
+        const err = document.getElementById('paste-error');
+        try {
+          loadEvalSet(JSON.parse(document.getElementById('paste-json').value));
+          box.remove();
+          document.getElementById('main-ui').hidden = false;
+        } catch (e) {
+          err.textContent = 'That did not parse: ' + e.message;
+        }
+      });
+    }
+
+    // ---- Skill name and description ---------------------------------------
+    //
+    // Both arrive inside inert <template> elements (see the data block comment).
+    // Reading .content.textContent gives back the original string whether the
+    // caller HTML-escaped it (entities decode) or forgot to (the raw text is
+    // recovered as text). Assigning with .textContent means neither value can
+    // become page structure on the way out either.
+    //
+    // The return value reports whether the substitution WAS escaped, so an
+    // unescaped one produces a visible banner instead of silence.
+    function readTemplate(outer, id) {
+      const tpl = outer && outer.content ? outer.content.querySelector('#' + id) : null;
+      if (!tpl || !tpl.content) return { text: '', missing: true, hadMarkup: false };
+      const hadMarkup = tpl.content.querySelectorAll('*').length > 0;
+      return { text: tpl.content.textContent, missing: false, hadMarkup: hadMarkup };
+    }
+
+    function showUnescapedWarning(fields) {
+      const box = document.createElement('div');
+      box.className = 'recovery';
+      box.style.marginBottom = '1rem';
+      box.innerHTML =
+        '<h2>This page was built with unescaped text</h2>'
+        + '<p>The <span id="unescaped-fields"></span> contained characters the browser read as '
+        + 'page structure rather than as text, and whoever built this file did not escape them. '
+        + 'The page has thrown that markup away, so what you see below may be missing part of the '
+        + 'original text.</p>'
+        + '<p><strong>What to do:</strong> the query list below is unaffected; carry on reviewing '
+        + 'it. Tell Claude &ldquo;the eval review page reported unescaped text&rdquo; so the page '
+        + 'gets rebuilt with the escaping the template asks for.</p>';
+      document.body.insertBefore(box, document.body.firstChild);
+      // textContent, not innerHTML: the field names are ours, but this is the
+      // one place a value could otherwise be echoed back into markup.
+      document.getElementById('unescaped-fields').textContent = fields.join(' and ');
+    }
+
+    (function start() {
+      // Remove the data block (and any debris a broken substitution left in
+      // it) before anything else touches the page.
+      const block = document.getElementById('data-block');
+      const meta = document.getElementById('skill-meta');
+      const name = readTemplate(meta, 'skill-name-src');
+      const desc = readTemplate(meta, 'skill-description-src');
+      // One script element plus the outer template: two expected children of
+      // the block itself (template contents are not descendants). More than
+      // that means part of a payload was parsed as page markup. The inner
+      // templates are counted separately, inside readTemplate.
+      const dataBrokenOut = !!block && block.querySelectorAll('*').length > 2;
+      // Debris between the inner templates: one of the two values carried a
+      // template end tag. Which one is no longer recoverable, so say both.
+      const metaBrokenOut = !!meta && meta.content.querySelectorAll('*').length > 2;
+      if (block) block.remove();
+
+      document.getElementById('skill-name').textContent = name.text;
+      document.getElementById('skill-desc').textContent = desc.text;
+      document.title = name.text
+        ? 'Eval Set Review - ' + name.text
+        : 'Eval Set Review';
+
+      const unescaped = [];
+      if (name.hadMarkup) unescaped.push('skill name');
+      if (desc.hadMarkup) unescaped.push('skill description');
+      // A template that is not where it should be was closed early by an end
+      // tag inside one of the values. Which of the two is no longer
+      // recoverable, so name both.
+      if ((metaBrokenOut || name.missing || desc.missing) && !unescaped.length) {
+        unescaped.push('skill name or description');
+      }
+      if (unescaped.length) showUnescapedWarning(unescaped);
+
+      if (typeof EVAL_DATA_RAW === 'undefined') {
+        // Written split so this very string cannot close the element it
+        // lives in -- the defect this page exists to survive.
+        showRecovery('The page data was truncated, most likely by an unescaped "<' + '/script>" '
+          + 'inside one of the queries.');
+        return;
+      }
+      try {
+        loadEvalSet(EVAL_DATA_RAW);
+      } catch (e) {
+        showRecovery(e.message);
+        return;
+      }
+      if (dataBrokenOut || metaBrokenOut) {
+        // Loaded, but the payload still put elements into the data block — an
+        // unescaped "<" + "/script>" or "<" + "/template>" that happened not to
+        // destroy the assignment. (Written split, like the message below: a
+        // literal closing tag in a comment closes this element just as surely
+        // as one in a string, and it truncated this whole script once already.)
+        // A console warning is not visible to the person reviewing the page, so
+        // say it on the page as well.
+        console.warn('eval_review: the data block contained markup; the substitution was not escaped.');
+        if (!unescaped.length) showUnescapedWarning(['page data']);
+      }
+    })();
+  </script>
+</body>
+</html>
