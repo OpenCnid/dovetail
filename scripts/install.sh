@@ -36,17 +36,11 @@ done
 # every one carries its own LICENSE, rather than leaning on the root file that
 # does not travel with a copied directory.
 #
-# using-dovetail is the entry point, naming the companion rule and the two
-# disable-model-invocation skills. On the plugin route a SessionStart hook
-# injects it; installed directly there is no pack to carry that hook, so it
-# lands as an ordinary skill and the user reads it.
-#
 # Spelled out rather than globbed, even though plugin.json now relies on the
 # skills/*/SKILL.md glob. The list is the thing test-skills.sh counts against,
 # so a skill added to disk but to neither file is a failure rather than a
 # silent partial install.
 SKILLS=(
-  "using-dovetail:skills/using-dovetail"
   "prompt-engineering:skills/prompt-engineering"
   "hypershot-protocol:skills/hypershot-protocol"
   "subagent-composition:skills/subagent-composition"

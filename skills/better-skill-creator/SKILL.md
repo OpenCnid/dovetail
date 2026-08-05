@@ -8,6 +8,11 @@ license: Apache-2.0
 
 Build a skill, find out whether it actually helps, and improve it on the evidence.
 
+**A SKILL.md is prompt bytes.** Before drafting one, invoke `prompt-engineering`
+and `hypershot-protocol` via the Skill tool — both, before the first authored
+byte — and draft against them. If either is not installed, say so once and
+continue without it.
+
 The loop:
 
 1. Work out what the skill should do, and whether it should be a skill at all
