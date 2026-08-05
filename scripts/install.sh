@@ -30,27 +30,29 @@ done
 
 # Each entry is "<name>:<path to the directory holding SKILL.md>".
 #
-# Seven sources keep the skill at .claude/skills/<name>/ so that a copy of that
-# directory carries the skill and nothing else. better-skill-creator is the one
-# exception and it is a real one: its scripts/, references/, agents/ and tests/
-# are part of the skill, so its whole repository is the skill directory.
+# Every source now keeps its skill at skills/<name>/, so a copy of that one
+# directory carries the skill and nothing else. That uniformity is new: seven
+# sources used to hold it at .claude/skills/<name>/, and better-skill-creator
+# was a standing exception whose whole repository was the skill directory.
+# Both are gone, and with them the special case this list used to carry.
 #
-# Every path is spelled out rather than globbed. A glob that silently matches
-# nothing installs a hollow pack that looks fine.
 # using-dovetail is the one skill this pack owns: an entry point naming the
 # companion rule and the two disable-model-invocation skills. On the plugin
 # route a SessionStart hook injects it; installed directly there is no pack to
 # carry that hook, so it lands as an ordinary skill and the user reads it.
+#
+# Every path is spelled out rather than globbed. A glob that silently matches
+# nothing installs a hollow pack that looks fine.
 SKILLS=(
   "using-dovetail:skills/using-dovetail"
-  "prompt-engineering:vendor/prompt-engineering/.claude/skills/prompt-engineering"
-  "hypershot-protocol:vendor/hypershot-protocol/.claude/skills/hypershot-protocol"
-  "subagent-composition:vendor/subagent-composition/.claude/skills/subagent-composition"
-  "judge-composition:vendor/judge-composition/.claude/skills/judge-composition"
-  "self-play:vendor/self-play/.claude/skills/self-play"
-  "better-skill-creator:vendor/better-skill-creator"
-  "upsum:vendor/upsum/.claude/skills/upsum"
-  "spark-steering:vendor/spark-steering/.claude/skills/spark-steering"
+  "prompt-engineering:vendor/prompt-engineering/skills/prompt-engineering"
+  "hypershot-protocol:vendor/hypershot-protocol/skills/hypershot-protocol"
+  "subagent-composition:vendor/subagent-composition/skills/subagent-composition"
+  "judge-composition:vendor/judge-composition/skills/judge-composition"
+  "self-play:vendor/self-play/skills/self-play"
+  "better-skill-creator:vendor/better-skill-creator/skills/better-skill-creator"
+  "upsum:vendor/upsum/skills/upsum"
+  "spark-steering:vendor/spark-steering/skills/spark-steering"
 )
 
 # ---------------------------------------------------------------- submodules

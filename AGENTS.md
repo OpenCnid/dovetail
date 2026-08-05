@@ -45,13 +45,24 @@ gate; installing it so it can be invoked does.
 - **Moving a pin ships new instructions to everyone who installs the pack.**
   Read `git diff --submodule=log` before committing a bump. `scripts/sync.sh`
   deliberately does not commit for you.
-- **The layout rule, and its one exception.** A skill directory is *exactly what
-  should land in `~/.claude/skills/<name>/`*. Seven sources therefore keep the
-  skill at `.claude/skills/<name>/`, so copying that directory carries the skill
-  and nothing else — no README, no licence, no `.git`. `better-skill-creator` is
-  the exception and it is a real one: its `scripts/`, `references/`, `agents/`
-  and `tests/` are part of the skill, so its whole repository *is* the skill
-  directory.
+- **The layout rule, and the exception that no longer exists.** A skill
+  directory is *exactly what should land in `~/.claude/skills/<name>/`*. Every
+  source now keeps its skill at `skills/<name>/`, so copying that one directory
+  carries the skill and nothing else, and each repository is installable as a
+  plugin in its own right because the loader's `skills/*/SKILL.md` glob finds it.
+
+  Two things used to complicate this and both are gone: seven sources held the
+  skill at `.claude/skills/<name>/`, and `better-skill-creator` was a standing
+  exception whose whole repository was the skill directory. Its `scripts/`,
+  `references/`, `agents/` and `tests/` are still part of the skill — they moved
+  with it rather than being left behind, decided per item on evidence of what
+  actually reads them.
+
+  One consequence worth keeping in mind when a skill directory is defined: a
+  licence and notice must live *inside* it, not only at the repository root.
+  Both the copy install and `better-skill-creator`'s own packager build from the
+  skill directory, so anything outside it is simply absent from what ships —
+  which for an Apache-licensed skill is a licensing problem, not a tidiness one.
 
   Both `plugin.json` and `install.sh` enumerate every path explicitly. If you add
   a skill, add its path to both — a glob that silently matches nothing installs a

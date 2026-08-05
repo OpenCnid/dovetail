@@ -30,14 +30,14 @@ STATIC_ONLY=0
 # Keep in step with SKILLS in install.sh and skills in plugin.json.
 SKILLS=(
   "using-dovetail:skills/using-dovetail"
-  "prompt-engineering:vendor/prompt-engineering/.claude/skills/prompt-engineering"
-  "hypershot-protocol:vendor/hypershot-protocol/.claude/skills/hypershot-protocol"
-  "subagent-composition:vendor/subagent-composition/.claude/skills/subagent-composition"
-  "judge-composition:vendor/judge-composition/.claude/skills/judge-composition"
-  "self-play:vendor/self-play/.claude/skills/self-play"
-  "better-skill-creator:vendor/better-skill-creator"
-  "upsum:vendor/upsum/.claude/skills/upsum"
-  "spark-steering:vendor/spark-steering/.claude/skills/spark-steering"
+  "prompt-engineering:vendor/prompt-engineering/skills/prompt-engineering"
+  "hypershot-protocol:vendor/hypershot-protocol/skills/hypershot-protocol"
+  "subagent-composition:vendor/subagent-composition/skills/subagent-composition"
+  "judge-composition:vendor/judge-composition/skills/judge-composition"
+  "self-play:vendor/self-play/skills/self-play"
+  "better-skill-creator:vendor/better-skill-creator/skills/better-skill-creator"
+  "upsum:vendor/upsum/skills/upsum"
+  "spark-steering:vendor/spark-steering/skills/spark-steering"
 )
 
 fail=0
