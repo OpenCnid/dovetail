@@ -1,5 +1,34 @@
 # Dovetail Release Notes
 
+## v0.2.1 (2026-08-05)
+
+Two documentation fixes upstream, both of the same kind: a claim that was wrong
+in a way nothing in the repository could disagree with.
+
+- **`upsum`'s checks command pointed at a path that only exists in a clone of
+  `upsum`.** Step 4 of the close ceremony documented
+  `python skills/upsum/scripts/checks.py .`, which fails with `can't open file`
+  anywhere the skill is actually installed — the script sits beside the skill at
+  `~/.claude/skills/upsum/scripts/checks.py`, and nothing under the working
+  directory answers to a repository-relative path. The line contains two paths
+  pointing at different places and only one of them moved: the script is beside
+  the skill, the trailing `.` is the repository being checked. `SKILL.md` now
+  resolves the script against `$SKILL_DIR`, which Claude Code announces as *Base
+  directory for this skill* on load. The README keeps the clone-relative form,
+  correct for a reader standing in a clone, with the installed form beside it.
+  (`OpenCnid/upsum#2`)
+- **`self-play`'s `AGENTS.md` reported a character count wrong by 759.** It
+  claimed `SKILL.md` sat at 19,277 of 19,900 with 623 characters of headroom;
+  the command documented three lines above it returns 18,518, so the real
+  headroom is 1,382 — more than twice what the line offered, making its "any
+  addition needs a matching removal" guidance tighter than the facts require.
+  The file had not drifted; the sentence was never re-measured. Corrected and
+  rewritten as a dated reading rather than a standing fact, because a bare
+  number cannot go stale loudly. (`OpenCnid/self-play#4`)
+
+Both predate the `skills/<name>/` restructure and were deliberately left alone
+during it, so that a real change did not bury an unrelated one.
+
 ## v0.2.0 (2026-08-05)
 
 The first release with notes. Everything below was probed on Claude Code
