@@ -78,12 +78,20 @@ two it will deny having. That is the intended state, not a broken install.
 Plugin skills are namespaced, so they cannot collide with skills you already
 have — you'll reach them as `dovetail:self-play` and so on.
 
+Installing the pack loads all nine skills at once, and a `SessionStart` hook
+injects `dovetail:using-dovetail` — the companion rule, and the notice that two
+of the skills are invisible to the model — into every session.
+
 > [!IMPORTANT]
-> **Verify this route once on a fresh machine before relying on it.** The pack
-> holds its skills as **git submodules**, and whether the plugin fetch recurses
-> into submodules is not something we have confirmed. If the skills come back
-> empty, that is why — use the direct install below, which has no such
-> dependency, and please open an issue so this note can be replaced with a fact.
+> **Partly verified.** On CLI 2.1.214 (Windows 10), `marketplace add` +
+> `install` against a **local checkout** registers all nine skills and the
+> `SessionStart` hook, and the hook fires. What that run does *not* test is the
+> thing this note was originally about: the pack holds its skills as **git
+> submodules**, and whether a fetch **from GitHub** recurses into them is still
+> unconfirmed — the local source already had them checked out. If the skills come
+> back empty, that is why; use the direct install below, which has no such
+> dependency, and please open an issue so this half can be replaced with a fact
+> too.
 
 ### Directly
 
@@ -101,10 +109,15 @@ pack.
 
 ## No copies
 
-**This repository contains zero copies of any skill.** Every one is a submodule
-pinned to a commit, so a drifted pin is a diff rather than a discovery. That is
-a deliberate correction: an earlier arrangement kept vendored copies, and one of
-them silently fell four thousand characters behind its source.
+**This repository contains zero copies of any vendored skill.** Every one is a
+submodule pinned to a commit, so a drifted pin is a diff rather than a
+discovery. That is a deliberate correction: an earlier arrangement kept vendored
+copies, and one of them silently fell four thousand characters behind its
+source.
+
+The one file of skill text written here is `skills/using-dovetail/SKILL.md`,
+which describes how the eight compose. It copies nothing: no source repository
+can write it, because none of them knows it will be packaged as `dovetail`.
 
 ```bash
 bash scripts/sync.sh --check   # report which pins are behind

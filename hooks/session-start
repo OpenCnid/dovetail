@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#
+# session-start — inject the using-dovetail entry skill into every session.
+#
+# Why a hook and not the skill's own description: the companion rule has to be
+# in context *before* the first prompt bytes are written, and two of the eight
+# skills carry disable-model-invocation, so the model cannot discover them by
+# listing skills. This is the only channel that reaches it in time.
+#
+# Why the pack and not the skill directories: a nested .claude-plugin/plugin.json
+# is honoured only when the directory is a plugin in its own right — the
+# skills-dir install route. Mounted as components of this pack, per-skill hooks
+# never register. Probed on CLI 2.1.214; see AGENTS.md.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SKILL="${PLUGIN_ROOT}/skills/using-dovetail/SKILL.md"
+
+if [ ! -r "$SKILL" ]; then
+  # A pack that cannot read its own entry skill should say so rather than
+  # inject an empty directive that looks like it worked.
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"dovetail: entry skill missing at skills/using-dovetail/SKILL.md; the pack is installed incompletely."}}\n'
+  exit 0
+fi
+
+body="$(cat "$SKILL")"
+
+# Escape for embedding in a JSON string. Each ${s//old/new} is one C-level pass.
+# Order matters: backslashes first, or the escapes we add get re-escaped.
+escape_for_json() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+escaped="$(escape_for_json "$body")"
+
+# printf rather than a heredoc: bash 5.3+ hangs on heredocs in this position.
+# https://github.com/obra/superpowers/issues/571
+printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$escaped"

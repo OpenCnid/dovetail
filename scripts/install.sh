@@ -37,7 +37,12 @@ done
 #
 # Every path is spelled out rather than globbed. A glob that silently matches
 # nothing installs a hollow pack that looks fine.
+# using-dovetail is the one skill this pack owns: an entry point naming the
+# companion rule and the two disable-model-invocation skills. On the plugin
+# route a SessionStart hook injects it; installed directly there is no pack to
+# carry that hook, so it lands as an ordinary skill and the user reads it.
 SKILLS=(
+  "using-dovetail:skills/using-dovetail"
   "prompt-engineering:vendor/prompt-engineering/.claude/skills/prompt-engineering"
   "hypershot-protocol:vendor/hypershot-protocol/.claude/skills/hypershot-protocol"
   "subagent-composition:vendor/subagent-composition/.claude/skills/subagent-composition"

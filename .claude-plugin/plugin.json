@@ -20,6 +20,7 @@
     "session-close"
   ],
   "skills": [
+    "./skills/using-dovetail",
     "./vendor/prompt-engineering/.claude/skills/prompt-engineering",
     "./vendor/hypershot-protocol/.claude/skills/hypershot-protocol",
     "./vendor/subagent-composition/.claude/skills/subagent-composition",
