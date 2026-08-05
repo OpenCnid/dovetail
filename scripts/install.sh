@@ -93,6 +93,14 @@ for entry in "${SKILLS[@]}"; do
   else
     rm -rf "$target"
     cp -r "$src" "$target"
+    # Version-control metadata never belongs in a skills directory. For the one
+    # entry whose source is a whole repository, $src carries a .git -- a submodule
+    # pointer file here, a real directory in a plain clone. The pointer is
+    # relative and dangles once copied, so every git command in the installed
+    # skill fails against a path that does not exist while the directory still
+    # looks version-controlled. A real .git can also carry a credentialed remote
+    # URL, which is why better-skill-creator's own packager excludes it.
+    rm -rf "$target/.git"
     printf '  install  %-22s <- %s\n' "$name" "${entry#*:}"
   fi
   installed=$((installed + 1))
