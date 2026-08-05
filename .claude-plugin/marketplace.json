@@ -8,7 +8,7 @@
     {
       "name": "dovetail",
       "source": "./",
-      "description": "Seven skills for authoring prompts, composing isolated sub-agents, and verifying what comes back without fooling yourself."
+      "description": "Eight skills for authoring prompts, composing isolated sub-agents, verifying what comes back without fooling yourself, and closing the session so the next one starts from what happened."
     }
   ]
 }

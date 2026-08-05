@@ -19,3 +19,6 @@
 [submodule "vendor/better-skill-creator"]
 	path = vendor/better-skill-creator
 	url = https://github.com/OpenCnid/better-skill-creator.git
+[submodule "vendor/upsum"]
+	path = vendor/upsum
+	url = https://github.com/OpenCnid/upsum.git
