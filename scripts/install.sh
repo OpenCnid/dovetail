@@ -30,49 +30,39 @@ done
 
 # Each entry is "<name>:<path to the directory holding SKILL.md>".
 #
-# Every source now keeps its skill at skills/<name>/, so a copy of that one
-# directory carries the skill and nothing else. That uniformity is new: seven
-# sources used to hold it at .claude/skills/<name>/, and better-skill-creator
-# was a standing exception whose whole repository was the skill directory.
-# Both are gone, and with them the special case this list used to carry.
+# Every skill lives in this repository now. There are no submodules, no pins,
+# and no fetch step: what you cloned is what installs. Each directory is exactly
+# what should land in ~/.claude/skills/<name>/, licence included -- which is why
+# every one carries its own LICENSE, rather than leaning on the root file that
+# does not travel with a copied directory.
 #
-# using-dovetail is the one skill this pack owns: an entry point naming the
-# companion rule and the two disable-model-invocation skills. On the plugin
-# route a SessionStart hook injects it; installed directly there is no pack to
-# carry that hook, so it lands as an ordinary skill and the user reads it.
+# using-dovetail is the entry point, naming the companion rule and the two
+# disable-model-invocation skills. On the plugin route a SessionStart hook
+# injects it; installed directly there is no pack to carry that hook, so it
+# lands as an ordinary skill and the user reads it.
 #
-# Every path is spelled out rather than globbed. A glob that silently matches
-# nothing installs a hollow pack that looks fine.
+# Spelled out rather than globbed, even though plugin.json now relies on the
+# skills/*/SKILL.md glob. The list is the thing test-skills.sh counts against,
+# so a skill added to disk but to neither file is a failure rather than a
+# silent partial install.
 SKILLS=(
   "using-dovetail:skills/using-dovetail"
-  "prompt-engineering:vendor/prompt-engineering/skills/prompt-engineering"
-  "hypershot-protocol:vendor/hypershot-protocol/skills/hypershot-protocol"
-  "subagent-composition:vendor/subagent-composition/skills/subagent-composition"
-  "judge-composition:vendor/judge-composition/skills/judge-composition"
-  "self-play:vendor/self-play/skills/self-play"
-  "better-skill-creator:vendor/better-skill-creator/skills/better-skill-creator"
-  "upsum:vendor/upsum/skills/upsum"
-  "spark-steering:vendor/spark-steering/skills/spark-steering"
+  "prompt-engineering:skills/prompt-engineering"
+  "hypershot-protocol:skills/hypershot-protocol"
+  "subagent-composition:skills/subagent-composition"
+  "judge-composition:skills/judge-composition"
+  "self-play:skills/self-play"
+  "better-skill-creator:skills/better-skill-creator"
+  "upsum:skills/upsum"
+  "spark-steering:skills/spark-steering"
 )
 
-# ---------------------------------------------------------------- submodules
-missing=0
-for entry in "${SKILLS[@]}"; do
-  [ -f "$ROOT/${entry#*:}/SKILL.md" ] || missing=1
-done
-
-if [ "$missing" -eq 1 ]; then
-  echo "Submodules are not checked out. Fetching them now."
-  echo "(A plain 'git clone' does not fetch submodules; use --recurse-submodules"
-  echo " next time, or run 'git submodule update --init' yourself.)"
-  echo
-  git -C "$ROOT" submodule update --init --depth 1
-  echo
-fi
-
+# ---------------------------------------------------------------- completeness
+# Nothing to fetch any more, so a missing SKILL.md is a broken checkout rather
+# than an un-run step, and there is no recovery to attempt on the user's behalf.
 for entry in "${SKILLS[@]}"; do
   if [ ! -f "$ROOT/${entry#*:}/SKILL.md" ]; then
-    echo "error: ${entry%%:*} has no SKILL.md at ${entry#*:} even after fetching." >&2
+    echo "error: ${entry%%:*} has no SKILL.md at ${entry#*:}." >&2
     echo "       The pack is incomplete; do not treat a partial install as a full one." >&2
     exit 1
   fi
@@ -100,13 +90,9 @@ for entry in "${SKILLS[@]}"; do
   else
     rm -rf "$target"
     cp -r "$src" "$target"
-    # Version-control metadata never belongs in a skills directory. For the one
-    # entry whose source is a whole repository, $src carries a .git -- a submodule
-    # pointer file here, a real directory in a plain clone. The pointer is
-    # relative and dangles once copied, so every git command in the installed
-    # skill fails against a path that does not exist while the directory still
-    # looks version-controlled. A real .git can also carry a credentialed remote
-    # URL, which is why better-skill-creator's own packager excludes it.
+    # Belt and braces: no skill directory holds a .git today, but version-control
+    # metadata in an installed skill makes the directory look tracked while every
+    # git command in it addresses a repository that is not there.
     rm -rf "$target/.git"
     printf '  install  %-22s <- %s\n' "$name" "${entry#*:}"
   fi

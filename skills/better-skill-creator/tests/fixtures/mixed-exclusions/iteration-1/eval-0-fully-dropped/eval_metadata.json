@@ -1,0 +1,8 @@
+{
+  "eval_id": 0,
+  "eval_name": "fully-dropped",
+  "prompt": "Task 0.",
+  "assertions": [
+    "Check A"
+  ]
+}

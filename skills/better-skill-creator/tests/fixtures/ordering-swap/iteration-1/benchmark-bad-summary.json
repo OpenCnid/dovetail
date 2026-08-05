@@ -1,0 +1,153 @@
+{
+  "primary": "with_skill",
+  "baseline": "without_skill",
+  "metadata": {
+    "skill_name": "swap-demo",
+    "timestamp": "2026-07-31T00:00:00Z",
+    "evals_run": [
+      0
+    ],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "swapped-order",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6667,
+        "passed": 2,
+        "failed": 1,
+        "abstained": 0,
+        "total": 3,
+        "time_seconds": 10.0,
+        "tokens": 500
+      },
+      "expectations": [
+        {
+          "text": "Header row present",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 1 is a header"
+        },
+        {
+          "text": "Totals row is last",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "totals row is in the middle"
+        },
+        {
+          "text": "Currency is formatted",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "GBP with two decimals"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "swapped-order",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.3333,
+        "passed": 1,
+        "failed": 2,
+        "abstained": 0,
+        "total": 3,
+        "time_seconds": 10.0,
+        "tokens": 500
+      },
+      "expectations": [
+        {
+          "text": "Totals row is last",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "totals row is last"
+        },
+        {
+          "text": "Header row present",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "no header row at all"
+        },
+        {
+          "text": "The currency is formatted",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "bare integers"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": "67%",
+        "stddev": null,
+        "min": 0.6667,
+        "max": 0.6667,
+        "n": 1,
+        "missing": 0
+      },
+      "time_seconds": {
+        "mean": 10.0,
+        "stddev": null,
+        "min": 10.0,
+        "max": 10.0,
+        "n": 1,
+        "missing": 0
+      },
+      "tokens": {
+        "mean": 500.0,
+        "stddev": null,
+        "min": 500,
+        "max": 500,
+        "n": 1,
+        "missing": 0
+      },
+      "runs": 1
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.3333,
+        "stddev": null,
+        "min": 0.3333,
+        "max": 0.3333,
+        "n": 1,
+        "missing": 0
+      },
+      "time_seconds": {
+        "mean": null,
+        "stddev": null,
+        "min": 10.0,
+        "max": 10.0,
+        "n": 1,
+        "missing": 0
+      },
+      "tokens": {
+        "mean": 500.0,
+        "stddev": null,
+        "min": 500,
+        "max": 500,
+        "n": 1,
+        "missing": 0
+      },
+      "runs": 1
+    },
+    "delta": {
+      "pass_rate": {
+        "value": 0.3334,
+        "formatted": "+0.33",
+        "polarity": "higher_is_better",
+        "better": true
+      }
+    }
+  },
+  "exclusions": [],
+  "layout_warnings": [],
+  "notes": []
+}

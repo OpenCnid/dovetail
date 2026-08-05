@@ -1,0 +1,14 @@
+# Vendored dependency pins — self-play
+#
+# Regenerated 2026-08-01. Verify with:
+#     sha256sum -c vendor/HASHES.txt
+#
+# Hashes are over LF content, which is what .gitattributes (eol=lf) checks
+# out on every platform — so these verify on a fresh clone anywhere. An
+# earlier generation recorded them against CRLF working copies on Windows;
+# five of the six then failed verification on any clean checkout.
+981bd9b0d92daf8b9c8c273bfe9ade7f9b225fc6afa7f14af4fdf1a0ff1868a0 *vendor/hypershot-protocol/SKILL.md
+3e563072eb5695aa8dfdbd05375a3bc7bb555ef2a69daac35db03b4d44b5f5cf *vendor/judge-composition/SKILL.md
+d6f1bbcad32693bc73f44d5db3152350aee025f79c553ed2aa4fcfa2cc9209aa *vendor/prompt-engineering/SKILL.md
+844dd833ef86ddedad4aaee596dd1824bb4f07a1354a7a5abda358d577f5120f *vendor/spark-steering/SKILL.md
+d6caff44ba55791a69ec7d7d233519bde3fb39eab97988217fa2c763b9bfc16e *vendor/subagent-composition/SKILL.md

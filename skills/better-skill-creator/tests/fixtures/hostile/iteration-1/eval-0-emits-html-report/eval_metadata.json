@@ -1,0 +1,10 @@
+{
+  "eval_id": 0,
+  "eval_name": "emits-html-report",
+  "prompt": "Build a one-page HTML report of Q3 sales. Итог: 42 — 日本語テキスト — café naïve",
+  "assertions": [
+    "Output is a CSV file",
+    "Header row present",
+    "Totals row is last"
+  ]
+}

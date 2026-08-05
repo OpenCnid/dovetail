@@ -1,0 +1,9 @@
+{
+  "eval_id": 0,
+  "eval_name": "outside-jurisdiction",
+  "prompt": "produce the report",
+  "assertions": [
+    "expectation 1",
+    "expectation 2"
+  ]
+}

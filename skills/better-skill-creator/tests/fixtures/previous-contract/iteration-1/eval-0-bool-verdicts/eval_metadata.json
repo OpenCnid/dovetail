@@ -1,0 +1,9 @@
+{
+  "eval_id": 0,
+  "eval_name": "boolean-verdicts",
+  "prompt": "Task graded before the ternary contract.",
+  "assertions": [
+    "Check A",
+    "Check B"
+  ]
+}

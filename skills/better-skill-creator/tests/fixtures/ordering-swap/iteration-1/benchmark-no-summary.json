@@ -1,0 +1,89 @@
+{
+  "primary": "with_skill",
+  "baseline": "without_skill",
+  "metadata": {
+    "skill_name": "swap-demo",
+    "timestamp": "2026-07-31T00:00:00Z",
+    "evals_run": [
+      0
+    ],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "swapped-order",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6667,
+        "passed": 2,
+        "failed": 1,
+        "abstained": 0,
+        "total": 3,
+        "time_seconds": 10.0,
+        "tokens": 500
+      },
+      "expectations": [
+        {
+          "text": "Header row present",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 1 is a header"
+        },
+        {
+          "text": "Totals row is last",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "totals row is in the middle"
+        },
+        {
+          "text": "Currency is formatted",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "GBP with two decimals"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "swapped-order",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.3333,
+        "passed": 1,
+        "failed": 2,
+        "abstained": 0,
+        "total": 3,
+        "time_seconds": 10.0,
+        "tokens": 500
+      },
+      "expectations": [
+        {
+          "text": "Totals row is last",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "totals row is last"
+        },
+        {
+          "text": "Header row present",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "no header row at all"
+        },
+        {
+          "text": "The currency is formatted",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "bare integers"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "exclusions": [],
+  "layout_warnings": [],
+  "notes": []
+}

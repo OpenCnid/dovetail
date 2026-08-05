@@ -1,0 +1,9 @@
+{
+  "eval_id": 0,
+  "eval_name": "misplaced-grading",
+  "prompt": "the misplaced prompt",
+  "assertions": [
+    "the output is a CSV file",
+    "a header row is present"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "subagent-composition",
+  "description": "Loads the prompt-engineering and hypershot-protocol companions whenever subagent-composition is invoked.",
+  "author": {
+    "name": "OpenCnid Labs"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "expectations": [
+    {
+      "text": "Header row present",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "row 1 is a header"
+    },
+    {
+      "text": "Totals row is last",
+      "verdict": "fail",
+      "abstainReason": null,
+      "evidence": "totals row is in the middle"
+    },
+    {
+      "text": "Currency is formatted",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "GBP with two decimals"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 1,
+    "abstained": 0,
+    "total": 3,
+    "pass_rate": 0.6667
+  }
+}

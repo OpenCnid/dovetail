@@ -1,0 +1,79 @@
+<svg viewBox="0 0 880 372" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="self-play: the builder's prediction, intent and stake stop at a boundary; inside the clean room a blind gatherer, an adversary and a blind evaluator run against a real target; judges score the result's utility, and the next variable feeds back into another iteration">
+  <defs>
+    <linearGradient id="ramp" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="50%" stop-color="#9b8cf7"/>
+      <stop offset="100%" stop-color="#ef6fd0"/>
+    </linearGradient>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="tipdim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b949e"/>
+    </marker>
+    <marker id="tiploop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9b8cf7"/>
+    </marker>
+  </defs>
+
+  <text x="440" y="46" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="34" font-weight="700" fill="url(#ramp)">self-play</text>
+  <text x="440" y="74" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="12.5" fill="#8b949e">a search you cannot bias &#183; isolation is the precondition, not the point</text>
+
+  <!-- the builder, walled off -->
+  <text x="122" y="112" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#8b949e" letter-spacing="1.5">THE BUILDER</text>
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="12" fill="#8b949e">
+    <text x="122" y="146" text-anchor="middle">your prediction</text>
+    <text x="122" y="186" text-anchor="middle">your intent</text>
+    <text x="122" y="226" text-anchor="middle">your stake</text>
+  </g>
+  <g stroke="#8b949e" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#tipdim)">
+    <line x1="196" y1="142" x2="214" y2="142"/>
+    <line x1="196" y1="182" x2="214" y2="182"/>
+    <line x1="196" y1="222" x2="214" y2="222"/>
+  </g>
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="13" fill="#ef6fd0" text-anchor="middle" opacity="0.85">
+    <text x="234" y="147">&#10005;</text>
+    <text x="234" y="187">&#10005;</text>
+    <text x="234" y="227">&#10005;</text>
+  </g>
+
+  <!-- the boundary -->
+  <line x1="250" y1="104" x2="250" y2="266" stroke="#8b949e" stroke-opacity="0.7" stroke-width="2" stroke-dasharray="5 5"/>
+
+  <!-- the clean room -->
+  <rect x="276" y="104" width="300" height="162" rx="12" fill="#58a6ff" fill-opacity="0.05" stroke="#58a6ff" stroke-opacity="0.45"/>
+  <text x="426" y="97" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#58a6ff" letter-spacing="1.5">THE CLEAN ROOM</text>
+
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="12">
+    <rect x="296" y="122" width="260" height="34" rx="8" fill="#58a6ff" fill-opacity="0.08" stroke="#58a6ff" stroke-opacity="0.4"/>
+    <text x="316" y="144" fill="#58a6ff">gatherer</text>
+    <text x="536" y="144" text-anchor="end" fill="#8b949e" font-size="10.5">blind to the hypothesis</text>
+
+    <rect x="296" y="166" width="260" height="34" rx="8" fill="#9b8cf7" fill-opacity="0.08" stroke="#9b8cf7" stroke-opacity="0.4"/>
+    <text x="316" y="188" fill="#9b8cf7">adversary</text>
+    <text x="536" y="188" text-anchor="end" fill="#8b949e" font-size="10.5">blind to your intent</text>
+
+    <rect x="296" y="210" width="260" height="34" rx="8" fill="#ef6fd0" fill-opacity="0.08" stroke="#ef6fd0" stroke-opacity="0.4"/>
+    <text x="316" y="232" fill="#ef6fd0">evaluator</text>
+    <text x="536" y="232" text-anchor="end" fill="#8b949e" font-size="10.5">blind to the prediction</text>
+  </g>
+
+  <!-- clean room to judges -->
+  <line x1="580" y1="185" x2="638" y2="185" stroke="#58a6ff" stroke-width="2" marker-end="url(#tip)"/>
+
+  <!-- judges -->
+  <rect x="646" y="152" width="212" height="66" rx="10" fill="#9b8cf7" fill-opacity="0.07" stroke="#9b8cf7" stroke-opacity="0.55"/>
+  <text x="752" y="180" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="13" fill="#9b8cf7">judges</text>
+  <text x="752" y="200" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#8b949e">score the utility</text>
+
+  <!-- the loop: next variable feeds the next iteration -->
+  <path d="M 752 222 L 752 316 L 426 316 L 426 276" fill="none" stroke="#9b8cf7" stroke-width="1.75" stroke-dasharray="5 4" marker-end="url(#tiploop)" stroke-opacity="0.85"/>
+  <text x="590" y="308" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="11" fill="#9b8cf7">the next variable &#8212; chosen where your wish cannot reach it</text>
+
+  <!-- the target -->
+  <text x="122" y="290" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#8b949e" letter-spacing="1.5">THE TARGET</text>
+  <text x="122" y="312" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="11" fill="#2ea44f">a real artifact at path:line</text>
+  <path d="M 122 322 L 122 342 L 426 342 L 426 328" fill="none" stroke="#2ea44f" stroke-width="1.5" stroke-opacity="0.6"/>
+
+  <text x="440" y="362" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="11" fill="#8b949e">iterations compound &#8212; a round that returns nothing new is the boundary of the space, recorded</text>
+</svg>

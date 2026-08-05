@@ -1,0 +1,23 @@
+{
+  "expectations": [
+    {
+      "text": "expectation 1",
+      "verdict": "pass",
+      "abstainReason": null,
+      "evidence": "output matched the expectation"
+    },
+    {
+      "text": "expectation 2",
+      "verdict": "abstain",
+      "abstainReason": "busy",
+      "evidence": "nothing in outputs/ could settle this; no transcript was supplied"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "abstained": 1,
+    "total": 2,
+    "pass_rate": 1.0
+  }
+}

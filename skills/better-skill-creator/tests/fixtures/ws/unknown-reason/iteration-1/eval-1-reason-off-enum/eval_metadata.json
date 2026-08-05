@@ -1,0 +1,9 @@
+{
+  "eval_id": 1,
+  "eval_name": "reason-outside-the-enum",
+  "prompt": "produce the report",
+  "assertions": [
+    "expectation 1",
+    "expectation 2"
+  ]
+}

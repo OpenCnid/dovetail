@@ -1,0 +1,415 @@
+{
+  "primary": "with_skill",
+  "baseline": "without_skill",
+  "metadata": {
+    "skill_name": "abstain-demo",
+    "timestamp": "2026-07-31T00:00:00Z",
+    "evals_run": [
+      0,
+      1,
+      2
+    ],
+    "runs_per_configuration": 3,
+    "runs_per_configuration_by_config": {
+      "with_skill": 3,
+      "without_skill": 3
+    }
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "every-check-abstained",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": null,
+        "passed": 0,
+        "failed": 0,
+        "abstained": 2,
+        "total": 2,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Follows the documented ordering of steps",
+          "verdict": "abstain",
+          "abstainReason": "jurisdiction",
+          "evidence": "no transcript_path was supplied; outputs/ holds report.csv only"
+        },
+        {
+          "text": "Handles the malformed row",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "the malformed-row case was not exercised by this run"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "every-check-abstained",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": null,
+        "passed": 0,
+        "failed": 0,
+        "abstained": 2,
+        "total": 2,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Follows the documented ordering of steps",
+          "verdict": "abstain",
+          "abstainReason": "jurisdiction",
+          "evidence": "no transcript_path was supplied; outputs/ holds report.csv only"
+        },
+        {
+          "text": "Handles the malformed row",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "the malformed-row case was not exercised by this run"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "thin-versus-complete",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 2,
+        "failed": 0,
+        "abstained": 9,
+        "total": 11,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Check 1",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 0 checked"
+        },
+        {
+          "text": "Check 2",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 1 checked"
+        },
+        {
+          "text": "Check 3",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 2 checked"
+        },
+        {
+          "text": "Check 4",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 3 checked"
+        },
+        {
+          "text": "Check 5",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 4 checked"
+        },
+        {
+          "text": "Check 6",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 5 checked"
+        },
+        {
+          "text": "Check 7",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 6 checked"
+        },
+        {
+          "text": "Check 8",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 7 checked"
+        },
+        {
+          "text": "Check 9",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 8 checked"
+        },
+        {
+          "text": "Check 10",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 9 checked"
+        },
+        {
+          "text": "Check 11",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 10 checked"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "thin-versus-complete",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 11,
+        "failed": 0,
+        "abstained": 0,
+        "total": 11,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Check 1",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 0 checked"
+        },
+        {
+          "text": "Check 2",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 1 checked"
+        },
+        {
+          "text": "Check 3",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 2 checked"
+        },
+        {
+          "text": "Check 4",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 3 checked"
+        },
+        {
+          "text": "Check 5",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 4 checked"
+        },
+        {
+          "text": "Check 6",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 5 checked"
+        },
+        {
+          "text": "Check 7",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 6 checked"
+        },
+        {
+          "text": "Check 8",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 7 checked"
+        },
+        {
+          "text": "Check 9",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 8 checked"
+        },
+        {
+          "text": "Check 10",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 9 checked"
+        },
+        {
+          "text": "Check 11",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "row 10 checked"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "both-reasons",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": null,
+        "passed": 0,
+        "failed": 0,
+        "abstained": 2,
+        "total": 2,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Uses the house date format",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 0 checked"
+        },
+        {
+          "text": "Was written by the skill",
+          "verdict": "abstain",
+          "abstainReason": "jurisdiction",
+          "evidence": "row 1 checked"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "both-reasons",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": null,
+        "passed": 0,
+        "failed": 0,
+        "abstained": 2,
+        "total": 2,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Uses the house date format",
+          "verdict": "abstain",
+          "abstainReason": "evidence",
+          "evidence": "row 0 checked"
+        },
+        {
+          "text": "Was written by the skill",
+          "verdict": "abstain",
+          "abstainReason": "jurisdiction",
+          "evidence": "row 1 checked"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": null,
+        "min": 1.0,
+        "max": 1.0,
+        "n": 1,
+        "missing": 2
+      },
+      "time_seconds": {
+        "mean": 2.0,
+        "stddev": 0.0,
+        "min": 2.0,
+        "max": 2.0,
+        "n": 3,
+        "missing": 0
+      },
+      "tokens": {
+        "mean": 100.0,
+        "stddev": 0.0,
+        "min": 100,
+        "max": 100,
+        "n": 3,
+        "missing": 0
+      },
+      "abstention": {
+        "abstained": 13,
+        "graded": 2,
+        "total": 15,
+        "rate": 0.8667,
+        "reasons": {
+          "jurisdiction": 2,
+          "evidence": 11,
+          "underspecified": 0,
+          "untyped": 0
+        },
+        "runs": 3,
+        "runs_without_pass_rate": 2
+      },
+      "runs": 3
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": null,
+        "min": 1.0,
+        "max": 1.0,
+        "n": 1,
+        "missing": 2
+      },
+      "time_seconds": {
+        "mean": 2.0,
+        "stddev": 0.0,
+        "min": 2.0,
+        "max": 2.0,
+        "n": 3,
+        "missing": 0
+      },
+      "tokens": {
+        "mean": 100.0,
+        "stddev": 0.0,
+        "min": 100,
+        "max": 100,
+        "n": 3,
+        "missing": 0
+      },
+      "abstention": {
+        "abstained": 4,
+        "graded": 11,
+        "total": 15,
+        "rate": 0.2667,
+        "reasons": {
+          "jurisdiction": 2,
+          "evidence": 2,
+          "underspecified": 0,
+          "untyped": 0
+        },
+        "runs": 3,
+        "runs_without_pass_rate": 2
+      },
+      "runs": 3
+    },
+    "delta": {
+      "pass_rate": {
+        "value": 0.0,
+        "formatted": "+0.00",
+        "polarity": "higher_is_better",
+        "better": null
+      },
+      "time_seconds": {
+        "value": 0.0,
+        "formatted": "+0.0",
+        "polarity": "lower_is_better",
+        "better": null
+      },
+      "tokens": {
+        "value": 0.0,
+        "formatted": "+0",
+        "polarity": "lower_is_better",
+        "better": null
+      }
+    }
+  },
+  "exclusions": [],
+  "layout_warnings": [],
+  "notes": []
+}

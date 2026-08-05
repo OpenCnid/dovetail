@@ -1,0 +1,22 @@
+# Runtime dependencies for better-skill-creator.
+#
+#   python -m pip install -r requirements.txt
+#
+# Compatibility: CPython 3.10 or newer. Several scripts use PEP 604 unions
+# (`str | None`) in *runtime* annotations without `from __future__ import
+# annotations`, so 3.9 raises TypeError at import, not at call.
+#
+# PyYAML is the one non-stdlib requirement. It parses SKILL.md frontmatter.
+# `scripts/utils.py` guards its import and raises SkillMdError with an install
+# hint when it is absent, so run_eval / run_loop / improve_description degrade
+# to a one-line message rather than a traceback -- but every one of them still
+# needs it to do anything useful.
+#
+# >=5.1 is the floor because `yaml.safe_load` is called without an explicit
+# Loader and 5.1 is where the loader deprecation landed.
+PyYAML>=5.1
+
+# Everything else in this tree is stdlib. The `claude` CLI is a separate,
+# non-pip dependency, needed only by the description-triggering optimizer
+# (scripts/run_eval.py, scripts/run_loop.py, scripts/improve_description.py).
+# Validation, packaging, aggregation and the viewer work without it.

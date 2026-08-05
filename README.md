@@ -4,8 +4,8 @@
 
 [![license](https://img.shields.io/badge/license-CC_BY_4.0-3b7ddd)](LICENSE.md)
 ![skills](https://img.shields.io/badge/skills-8-58a6ff)
-![copies](https://img.shields.io/badge/vendored_copies-0-2ea44f)
-![pinned](https://img.shields.io/badge/pinned_by-git_submodule-9b8cf7)
+![layout](https://img.shields.io/badge/layout-monorepo-2ea44f)
+![submodules](https://img.shields.io/badge/submodules-0-9b8cf7)
 
 A dovetail joint holds because of how the pieces are cut. No fasteners, no
 adhesive — the strength *is* the fit. That is the claim this pack makes about
@@ -39,14 +39,14 @@ skill here is a countermeasure against fluent output that feels like rigor.
 
 | skill | what it is for |
 |---|---|
-| [prompt-engineering](https://github.com/OpenCnid/prompt-engineering) | structural clarity over magic words — tagging, markers, placeholders, attention |
-| [hypershot-protocol](https://github.com/OpenCnid/hypershot-protocol) | priming structure without priming content; frames with free variables |
-| [subagent-composition](https://github.com/OpenCnid/subagent-composition) | what crosses the sub-agent boundary, and the return contract that survives it |
-| [judge-composition](https://github.com/OpenCnid/judge-composition) | four invariant roles, composed fresh per question. No default cast |
-| [self-play](https://github.com/OpenCnid/self-play) | a clean-room search over a space you have not solved |
-| [better-skill-creator](https://github.com/OpenCnid/better-skill-creator) | author a skill, then find out whether it actually helps |
-| [upsum](https://github.com/OpenCnid/upsum) | what survives a session, decided on purpose rather than by what you happen to remember — **invoke it yourself; it does not auto-fire** |
-| [spark-steering](https://github.com/OpenCnid/spark-steering) | which capability axis is short, before you install a fix that charges rent — **invoke it yourself; it does not auto-fire** |
+| [prompt-engineering](skills/prompt-engineering/SKILL.md) | structural clarity over magic words — tagging, markers, placeholders, attention |
+| [hypershot-protocol](skills/hypershot-protocol/SKILL.md) | priming structure without priming content; frames with free variables |
+| [subagent-composition](skills/subagent-composition/SKILL.md) | what crosses the sub-agent boundary, and the return contract that survives it |
+| [judge-composition](skills/judge-composition/SKILL.md) | four invariant roles, composed fresh per question. No default cast |
+| [self-play](skills/self-play/SKILL.md) | a clean-room search over a space you have not solved |
+| [better-skill-creator](skills/better-skill-creator/SKILL.md) | author a skill, then find out whether it actually helps |
+| [upsum](skills/upsum/SKILL.md) | what survives a session, decided on purpose rather than by what you happen to remember — **invoke it yourself; it does not auto-fire** |
+| [spark-steering](skills/spark-steering/SKILL.md) | which capability axis is short, before you install a fix that charges rent — **invoke it yourself; it does not auto-fire** |
 
 **Six of the eight trigger on their own. `spark-steering` and `upsum` do not**,
 by design: both carry `disable-model-invocation: true`, and both make that trade
@@ -86,8 +86,12 @@ of the skills are invisible to the model — into every session.
 > **Verified from GitHub**, which this note used to say was the open question.
 > On CLI 2.1.214 (Windows 10), `marketplace add` of the HTTPS URL followed by
 > `install` reports `Skills (9)` and `Hooks (1) SessionStart`, and all nine
-> bodies load in a session. **A plugin fetch does recurse into the submodules** —
-> that was the doubt, and it is settled.
+> bodies load in a session.
+>
+> That run predates `0.3.0`, when the skills were still submodules and whether a
+> plugin fetch recursed into them was the open doubt. It did. The question is now
+> moot — there are no submodules to recurse into — and the result is kept because
+> it is what retired the doubt rather than sidestepping it.
 >
 > Two things that will bite on Windows, both observed:
 >
@@ -95,48 +99,47 @@ of the skills are invisible to the model — into every session.
 >   resolves to `git@github.com:` and fails with *Permission denied (publickey)*
 >   on any machine without SSH keys, even though the repository is public.
 > - **Install under a short path.** `better-skill-creator` carries deep test
->   fixtures, and its longest path leaves about 62 characters of headroom below
->   the 260-character `MAX_PATH` limit under a default `~/.claude`. A long
+>   fixtures. Its longest path is 136 characters, which under a default
+>   `~/.claude` leaves 62 below the 260-character `MAX_PATH` limit. A long
 >   username or a deep `CLAUDE_CONFIG_DIR` overruns it, and the failure reads as
 >   `fetch-pack: invalid index-pack output` — a clone error that says nothing
 >   about path length. `git config --global core.longpaths true` removes the
->   limit. This predates the `skills/<name>/` layout, which spent 28 of those
->   characters.
+>   limit.
+>
+>   Dropping the submodules bought 28 characters back: at `0.2.1` the same file
+>   sat under `vendor/better-skill-creator/` for 164 characters and 34 of
+>   headroom. Measured 2026-08-05; re-measure rather than trusting these numbers.
 
 ### Directly
 
 ```bash
-git clone --recurse-submodules https://github.com/OpenCnid/dovetail.git
+git clone https://github.com/OpenCnid/dovetail.git
 cd dovetail
 bash scripts/install.sh
 ```
 
-`--dry-run` to see what it would do, `--force` to replace skills you already
-have, `--project` to install into `./.claude/skills` and commit them with a
-repo. It refuses to overwrite anything without `--force`, and if you forget
-`--recurse-submodules` it fetches them for you rather than installing a hollow
-pack.
+A plain clone is the whole thing — no `--recurse-submodules`, no fetch step, no
+way to end up with a hollow pack. `--dry-run` to see what it would do, `--force`
+to replace skills you already have, `--project` to install into
+`./.claude/skills` and commit them with a repo. It refuses to overwrite anything
+without `--force`.
 
-## No copies
+## One repository
 
-**This repository contains zero copies of any vendored skill.** Every one is a
-submodule pinned to a commit, so a drifted pin is a diff rather than a
-discovery. That is a deliberate correction: an earlier arrangement kept vendored
-copies, and one of them silently fell four thousand characters behind its
-source.
+Every skill lives here, in `skills/<name>/`. There are no submodules, no pins,
+and no sync step: what you clone is what installs, and a drifted copy is not a
+thing that can happen because there is nothing to drift from.
 
-The one file of skill text written here is `skills/using-dovetail/SKILL.md`,
-which describes how the eight compose. It copies nothing: no source repository
-can write it, because none of them knows it will be packaged as `dovetail`.
+This is a reversal. Until `0.3.0` the pack held eight submodules and hosted
+nothing, on the principle that each skill stayed canonical in its own
+repository. That bought a real property — a pin either points where it pointed
+or the diff says otherwise — and cost a step before every change, plus a class
+of failure where the pack and its sources could disagree about which was right.
+`docs/provenance.md` records where each skill came from and the commit it
+arrived at; the source repositories remain the archive of their own history.
 
-```bash
-bash scripts/sync.sh --check   # report which pins are behind
-bash scripts/sync.sh           # advance them; commit the bumps yourself
-```
-
-Each source repository stays canonical for its own development. This pack is the
-**install path**, not the authority — where a pin and its source disagree, the
-source wins and the pin gets moved.
+What replaces the pin discipline is `scripts/test-skills.sh`, which checks that
+every skill still loads rather than that every pointer still points.
 
 ## What is honestly weak here
 

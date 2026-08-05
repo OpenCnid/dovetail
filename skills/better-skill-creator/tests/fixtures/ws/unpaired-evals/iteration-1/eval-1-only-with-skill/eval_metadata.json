@@ -1,0 +1,9 @@
+{
+  "eval_id": 1,
+  "eval_name": "only-with-skill",
+  "prompt": "the unpaired prompt",
+  "assertions": [
+    "the output is a CSV file",
+    "a header row is present"
+  ]
+}

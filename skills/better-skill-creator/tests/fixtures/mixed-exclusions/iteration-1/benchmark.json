@@ -1,0 +1,227 @@
+{
+  "primary": "with_skill",
+  "baseline": "without_skill",
+  "metadata": {
+    "skill_name": "mixed-exclusions",
+    "timestamp": "2026-07-31T00:00:00Z",
+    "evals_run": [
+      0,
+      1,
+      2
+    ],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "fully-dropped",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.0,
+        "passed": 0,
+        "failed": 1,
+        "abstained": 0,
+        "total": 1,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Check A",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "checked"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "timing-only",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 1,
+        "failed": 0,
+        "abstained": 0,
+        "total": 1,
+        "time_seconds": null,
+        "tokens": null
+      },
+      "expectations": [
+        {
+          "text": "Check A",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "checked"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "timing-only",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.0,
+        "passed": 0,
+        "failed": 1,
+        "abstained": 0,
+        "total": 1,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Check A",
+          "verdict": "fail",
+          "abstainReason": null,
+          "evidence": "checked"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "unpaired",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 1,
+        "failed": 0,
+        "abstained": 0,
+        "total": 1,
+        "time_seconds": 2.0,
+        "tokens": 100
+      },
+      "expectations": [
+        {
+          "text": "Check A",
+          "verdict": "pass",
+          "abstainReason": null,
+          "evidence": "checked"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0,
+        "n": 2,
+        "missing": 0
+      },
+      "time_seconds": {
+        "mean": 2.0,
+        "stddev": null,
+        "min": 2.0,
+        "max": 2.0,
+        "n": 1,
+        "missing": 1
+      },
+      "tokens": {
+        "mean": 100.0,
+        "stddev": null,
+        "min": 100,
+        "max": 100,
+        "n": 1,
+        "missing": 1
+      },
+      "abstention": {
+        "abstained": 0,
+        "graded": 2,
+        "total": 2,
+        "rate": 0.0,
+        "reasons": {
+          "jurisdiction": 0,
+          "evidence": 0,
+          "underspecified": 0,
+          "untyped": 0
+        },
+        "runs": 2,
+        "runs_without_pass_rate": 0
+      },
+      "runs": 2
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "n": 2,
+        "missing": 0
+      },
+      "time_seconds": {
+        "mean": 2.0,
+        "stddev": 0.0,
+        "min": 2.0,
+        "max": 2.0,
+        "n": 2,
+        "missing": 0
+      },
+      "tokens": {
+        "mean": 100.0,
+        "stddev": 0.0,
+        "min": 100,
+        "max": 100,
+        "n": 2,
+        "missing": 0
+      },
+      "abstention": {
+        "abstained": 0,
+        "graded": 2,
+        "total": 2,
+        "rate": 0.0,
+        "reasons": {
+          "jurisdiction": 0,
+          "evidence": 0,
+          "underspecified": 0,
+          "untyped": 0
+        },
+        "runs": 2,
+        "runs_without_pass_rate": 0
+      },
+      "runs": 2
+    },
+    "delta": {
+      "pass_rate": {
+        "value": 1.0,
+        "formatted": "+1.00",
+        "polarity": "higher_is_better",
+        "better": true
+      }
+    }
+  },
+  "exclusions": [
+    {
+      "path": "iteration-1/eval-0-fully-dropped/with_skill/run-1/grading.json",
+      "reason": "[C12:schema_invalid=error] a grading.json or timing.json failed schema validation, so it is excluded from aggregation and listed in exclusions. failed grading.json schema validation",
+      "errors": [
+        "expectations[0]: has 'met' where the contract has 'verdict'"
+      ]
+    },
+    {
+      "path": "iteration-1/eval-1-timing-only/with_skill/run-1/timing.json",
+      "reason": "[C12:schema_invalid=error] a grading.json or timing.json failed schema validation, so it is excluded from aggregation and listed in exclusions. failed timing.json schema validation, so this run's tokens and duration are excluded and render as —. Its grading still counts",
+      "errors": [
+        "total_tokens: -500 is negative"
+      ]
+    },
+    {
+      "path": "iteration-1/eval-2-unpaired/with_skill/run-1",
+      "reason": "[C12:unpaired_evals=error] an eval's runs are not paired across the two configurations: it ran in one and not in the other, or exclusions left the two sides with different surviving runs. eval 2 ran under `with_skill` but not under `without_skill`, so it is excluded from every delta. It still counts toward `with_skill`'s own column, which is why the columns and the delta cover different evals here",
+      "errors": []
+    }
+  ],
+  "layout_warnings": [],
+  "notes": []
+}

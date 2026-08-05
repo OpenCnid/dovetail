@@ -1,7 +1,7 @@
 {
   "name": "dovetail",
   "displayName": "Dovetail",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Eight Claude Code skills that hold together by shape: author prompts without contaminating them, compose isolated sub-agents and judge panels, verify the result in a clean room without fooling yourself, and close the session so the next one starts from what actually happened.",
   "author": {
     "name": "OpenCnid Labs",
@@ -18,16 +18,5 @@
     "judge-panel",
     "skill-authoring",
     "session-close"
-  ],
-  "skills": [
-    "./skills/using-dovetail",
-    "./vendor/prompt-engineering/skills/prompt-engineering",
-    "./vendor/hypershot-protocol/skills/hypershot-protocol",
-    "./vendor/subagent-composition/skills/subagent-composition",
-    "./vendor/judge-composition/skills/judge-composition",
-    "./vendor/self-play/skills/self-play",
-    "./vendor/better-skill-creator/skills/better-skill-creator",
-    "./vendor/upsum/skills/upsum",
-    "./vendor/spark-steering/skills/spark-steering"
   ]
 }

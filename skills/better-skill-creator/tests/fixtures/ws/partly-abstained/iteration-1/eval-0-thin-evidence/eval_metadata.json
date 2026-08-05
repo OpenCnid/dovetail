@@ -1,0 +1,18 @@
+{
+  "eval_id": 0,
+  "eval_name": "thin-evidence",
+  "prompt": "produce the report",
+  "assertions": [
+    "expectation 1",
+    "expectation 2",
+    "expectation 3",
+    "expectation 4",
+    "expectation 5",
+    "expectation 6",
+    "expectation 7",
+    "expectation 8",
+    "expectation 9",
+    "expectation 10",
+    "expectation 11"
+  ]
+}

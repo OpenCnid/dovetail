@@ -1,0 +1,2670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <!--
+    No webfont CDN. The page is generated for local review and is often opened
+    offline or in a sandbox; remote fonts silently fell back to the system
+    serif anyway, so the two extra hosts bought nothing. SheetJS is still
+    remote because it cannot be inlined at a sensible size — every path that
+    uses it degrades to a download link when it fails to load.
+  -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --amber: #a8791f;
+      --amber-bg: #fbf3e0;
+      --red: #c44;
+      --red-bg: #fceaea;
+      /* The third verdict. Deliberately not green, not red, and
+         not the amber the warning boxes use: an abstention is a finding, not
+         a caution. Deliberately not the muted grey either — grey on this page
+         means "never recorded", and an abstention is the opposite of that. The
+         judge looked and declined to rule. */
+      --slate: #5b6b8a;
+      --slate-bg: #eef1f7;
+      /* The third abstention REASON, which is not a third verdict.
+         `jurisdiction` and `evidence` are repaired by somebody other than the
+         person reading this page — reassign the judge, capture the artifact —
+         so they share the slate every abstention is drawn in. `underspecified`
+         is repaired by rewriting the sentence, and the only person who can do
+         that is whoever wrote the eval. It gets a colour of its own so it
+         cannot be skimmed as a near-miss of the other two. */
+      --violet: #6b4fa0;
+      --violet-bg: #f1ecf9;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+      --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      --font-serif: 'Lora', Georgia, 'Times New Roman', serif;
+      --font-mono: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-serif);
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: var(--font-sans);
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+      max-width: 70ch;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: var(--font-sans);
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: var(--font-sans);
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* Unknown / not-recorded values. Never rendered as 0 or as blank. */
+    .unknown {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .run-metrics {
+      margin-top: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--font-mono);
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .fallback-note {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--border);
+      color: var(--text);
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-partial { background: var(--amber-bg); color: var(--amber); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .grade-unknown { background: var(--border); color: var(--text-muted); }
+    .grade-abstain { background: var(--slate-bg); color: var(--slate); }
+    /* Sits beside the pass-rate badge and is never optional when there are
+       abstentions. 100% over two graded checks and nine abstentions must not
+       render the same as 100% over eleven. */
+    .grade-abstain-note {
+      font-size: 0.75rem;
+      color: var(--slate);
+      background: var(--slate-bg);
+      border-radius: var(--radius);
+      padding: 0.125rem 0.5rem;
+    }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-status.abstain { color: var(--slate); }
+    /* The typed reason travels with every abstention. Each reason names a
+       different repair, performed by a different person, so an abstention
+       rendered without its reason has thrown away the actionable half. The
+       modifier classes below are named by the `cls` field of the one
+       ABSTAIN_REASONS table in the script — never by a second list here. */
+    .assertion-reason {
+      display: inline-block;
+      margin-left: 0.375rem;
+      padding: 0 0.375rem;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      background: var(--slate-bg);
+      color: var(--slate);
+      font-family: var(--font-sans);
+      font-size: 0.6875rem;
+      font-weight: 600;
+      vertical-align: middle;
+    }
+    /* Repaired by reassigning the judge, or by capturing what the run did not
+       produce. Either way the next move belongs to whoever runs the panel or
+       the harness, so both stay in the abstention's own slate. */
+    .assertion-reason.reason-jurisdiction,
+    .assertion-reason.reason-evidence {
+      background: var(--slate-bg);
+      color: var(--slate);
+    }
+    /* Repaired only by rewriting the assertion. No judge, with any evidence,
+       could rule on it — so this is not a weaker `jurisdiction` and must not
+       be drawn as one. Filled and outlined in its own colour, because the
+       reader of this page is the person who has to act. */
+    .assertion-reason.reason-underspecified {
+      background: var(--violet-bg);
+      color: var(--violet);
+      border-color: var(--violet);
+    }
+    /* A reason string this page does not recognize. It is data — the producer
+       wrote it down — so it must not borrow a recognized reason's colour and
+       must not be drawn as the grey this page reserves for "never recorded". */
+    .assertion-reason.reason-unrecognized {
+      background: var(--surface);
+      color: var(--text);
+      border-color: var(--text-muted);
+      border-style: dashed;
+    }
+    /* Nothing was recorded. This is the only one of the four that may be grey. */
+    .assertion-reason.reason-missing {
+      background: var(--border);
+      color: var(--text-muted);
+    }
+    /* The repair sits under the reason, in the reason's own colour. Typing an
+       abstention is only worth anything if the three types lead to three
+       different actions, and this line is where the action is named. */
+    .assertion-repair {
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+      color: var(--slate);
+    }
+    .assertion-repair.reason-underspecified { color: var(--violet); font-weight: 600; }
+    .assertion-repair.reason-unrecognized { color: var(--text); }
+    .assertion-repair.reason-missing { color: var(--text-muted); }
+    .abstain-legend {
+      list-style: none;
+      margin-top: 0.375rem;
+    }
+    .abstain-legend li { margin-top: 0.25rem; }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: var(--font-sans);
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 0.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .benchmark-table th {
+      font-family: var(--font-sans);
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table th .role {
+      display: block;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
+      opacity: 0.7;
+      font-size: 0.6875rem;
+    }
+    .benchmark-table td .metric-note {
+      display: block;
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+      font-weight: 400;
+      margin-top: 0.125rem;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    /* Colour by goodness, not by arithmetic sign. */
+    .benchmark-delta-better { color: var(--green); font-weight: 600; }
+    .benchmark-delta-worse { color: var(--red); font-weight: 600; }
+    .benchmark-abstain { color: var(--slate); font-weight: 600; }
+    .benchmark-caption {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+      max-width: 90ch;
+    }
+    .benchmark-warning {
+      background: var(--amber-bg);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      border-radius: var(--radius);
+      padding: 0.625rem 0.875rem;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      margin-bottom: 1rem;
+    }
+    .assertion-drift {
+      display: block;
+      color: var(--amber);
+      font-size: 0.6875rem;
+      margin-top: 0.25rem;
+    }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: var(--font-sans);
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+    /* A condition about THIS run, shown on the screen the reviewer works
+       through rather than only on the Benchmark tab they may never open. */
+    .run-notice {
+      background: var(--amber-bg);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      border-radius: var(--radius);
+      padding: 0.625rem 0.875rem;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      margin: 0 0 1rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: var(--font-sans);
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: var(--font-sans);
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Read each output and say what you think in the box below. Your notes save
+          automatically as you type &mdash; there is nothing to copy. Move between screens with the arrow keys
+          or the buttons, then click &ldquo;Submit All Reviews&rdquo; when you have been through them all.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Anything about this run that the benchmark will treat differently
+           from how this page shows it. Populated by showRun(). -->
+      <div class="run-notice" id="run-notice" style="display:none;"></div>
+
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Automated checks
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <!-- Says what this page knows, which is only whether a benchmark was
+             handed to it. It used to assert that no benchmark existed, which
+             it cannot know and which was false whenever benchmark.json sat in
+             the workspace unread. -->
+        <div class="benchmark-empty">No benchmark.json was passed to this viewer, and none was
+          found in the workspace directory. If one exists elsewhere, re-run generate_review.py
+          with --benchmark pointing at it.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p id="done-message">Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    // The generator escapes "<", ">" and "&" as JavaScript \uXXXX escapes
+    // before splicing the JSON in here, so no payload can close this element.
+    /*__EMBEDDED_DATA__*/
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // The single marker for "we do not know this value". Absent data is
+    // absent. It is never rendered as 0, and never as an empty cell
+    // that could pass for a measurement.
+    const UNKNOWN = "—";
+    const UNKNOWN_HTML = '<span class="unknown">' + UNKNOWN + '</span>';
+
+    // ---- Escaping ----------------------------------------------------------
+    //
+    // Three contexts, three rules:
+    //
+    //  1. HTML text node   -> escapeHtml()  (& < > are enough, but see 2)
+    //  2. HTML attribute   -> escapeHtml()  (must ALSO cover " and ')
+    //  3. JS script literal -> handled in generate_review.py before this file
+    //     is ever loaded, because by the time JS runs it is far too late.
+    //
+    // The old implementation round-tripped through textContent/innerHTML,
+    // which escapes & < > and nothing else. Every value that landed in a
+    // title="..." attribute could therefore close the attribute and add its
+    // own event handler. One function that escapes all five characters is
+    // correct for both 1 and 2; over-escaping in a text node is invisible.
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return "";
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    // ---- Small helpers -----------------------------------------------------
+    function isNum(v) {
+      return typeof v === "number" && isFinite(v);
+    }
+
+    // Render a value that may legitimately be unknown.
+    function orUnknown(value, render) {
+      if (value === null || value === undefined) return UNKNOWN_HTML;
+      return render ? render(value) : escapeHtml(value);
+    }
+
+    function labelFor(config) {
+      return String(config == null ? "" : config)
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    // ---- Verdicts ----------------------------------------------------------
+    //
+    // Three states, and the third is not "unknown". `abstain` means the judge
+    // looked at this expectation and declined to rule on it — for one of the
+    // typed reasons in ABSTAIN_REASONS below, each of which names a different
+    // repair. Under the previous contract there were two states and
+    // the grader prompt closed the gap with "when you genuinely cannot tell, it
+    // fails", so a verified-false check and an uncheckable one produced the
+    // identical byte and this page drew them the same red ✗.
+    //
+    // Everything below follows from that being wrong in both directions:
+    //  * an abstention must not be drawn as a failure (the old defect);
+    //  * it must not be drawn as a pass (worse);
+    //  * it must not be drawn as UNKNOWN either, because grey on this page
+    //    means "never recorded" and this was recorded, deliberately, with a
+    //    reason attached;
+    //  * and the reason has to be on screen, because each typed reason names a
+    //    different repair, performed by a different person.
+    const VERDICT_ICON = { pass: "✓", fail: "✗", abstain: "◐" };
+    const VERDICT_CELL_CLASS = {
+      pass: "benchmark-delta-better",
+      fail: "benchmark-delta-worse",
+      abstain: "benchmark-abstain",
+    };
+
+    // ---- The typed reasons, in one table -----------------------------------
+    //
+    // Everything this page knows about an abstention reason is here: the
+    // whitelist, the sentence a reader gets, the repair that reason calls for,
+    // and the class that colours it. There is no second list anywhere — adding
+    // a reason is one entry, and removing this table's authority over any of
+    // those four is how the last one went wrong.
+    //
+    // It went wrong exactly once and in exactly this shape: the contract's enum
+    // grew to three while two hand-maintained whitelists here stayed at two, so
+    // a schema-VALID grading carrying `underspecified` rendered as "abstained:
+    // reason not recorded". That is present data displayed as absent — worse
+    // than an unknown value shown plainly, because it tells the reader the
+    // producer failed to record something the producer did record, and sends
+    // them to fix the grader instead of the sentence.
+    //
+    // The enum itself lives in scripts/validate_grading.py (ABSTAIN_REASONS)
+    // and this page cannot import it. tests/test_eval_viewer.py runs this
+    // script under node, reads Object.keys(ABSTAIN_REASONS) back out, and
+    // fails when the two sets differ — so a fourth reason is caught by a test
+    // rather than by whoever eventually notices a badge that reads "not
+    // recorded".
+    const ABSTAIN_REASONS = {
+      jurisdiction: {
+        text: "outside what this judge could rule on",
+        repair: "Fix: reassign the judge. A standard that settles this exists, "
+              + "and somebody who is not this judge holds it.",
+        cls: "reason-jurisdiction",
+      },
+      evidence: {
+        text: "in scope, but the evidence a ruling needed was not in hand",
+        repair: "Fix: supply the missing artifact — a transcript, the input "
+              + "file — and grade the run again.",
+        cls: "reason-evidence",
+      },
+      underspecified: {
+        text: "this statement cannot be graded as written: no judge, with any "
+            + "evidence, could rule on it, because it names no property of the "
+            + "artifact",
+        repair: "Fix: rewrite the assertion. This repair is yours and nobody "
+              + "else's — reassigning the judge and capturing more from the "
+              + "run both leave it exactly as undecidable as it is now.",
+        cls: "reason-underspecified",
+      },
+    };
+
+    function knownReason(reason) {
+      return Object.prototype.hasOwnProperty.call(ABSTAIN_REASONS, reason)
+        ? ABSTAIN_REASONS[reason] : null;
+    }
+
+    function reasonNames() {
+      const keys = Object.keys(ABSTAIN_REASONS);
+      if (keys.length < 2) return keys.join("");
+      return keys.slice(0, -1).join(", ") + " or " + keys[keys.length - 1];
+    }
+
+    function verdictOf(exp) {
+      if (!exp || typeof exp !== "object") return null;
+      const v = exp.verdict;
+      return (v === "pass" || v === "fail" || v === "abstain") ? v : null;
+    }
+
+    // Three outcomes, deliberately not two. A reason string this page does not
+    // recognize was RECORDED — it simply is not one of the reasons this build
+    // knows — and folding it into "nothing was recorded" is the same class of
+    // lie as folding `underspecified` into `jurisdiction`: it reports absent
+    // data where there is present data, and points the reader at the wrong
+    // producer.
+    function abstainReasonState(exp) {
+      const raw = exp ? exp.abstainReason : null;
+      if (typeof raw === "string" && knownReason(raw)) {
+        return { key: raw, recorded: raw, known: true };
+      }
+      const recorded = (raw === null || raw === undefined || raw === "")
+        ? null : String(raw);
+      return { key: null, recorded: recorded, known: false };
+    }
+
+    // There is deliberately no second accessor returning just the key. Every
+    // caller goes through abstainReasonState and then abstainBadge, because a
+    // caller holding only the key cannot tell an unrecognized reason from an
+    // absent one — which is the distinction this page got wrong.
+
+    // One renderer, used by the per-run grades panel and by the Benchmark
+    // tab's comparison table. They phrased this separately before, and only
+    // one of the two was ever kept current.
+    function abstainBadge(state) {
+      if (state && state.known) {
+        const entry = ABSTAIN_REASONS[state.key];
+        return {
+          cls: entry.cls,
+          short: state.key,
+          label: "abstained: " + state.key,
+          detail: entry.text,
+          repair: entry.repair,
+        };
+      }
+      if (state && state.recorded !== null && state.recorded !== undefined) {
+        return {
+          cls: "reason-unrecognized",
+          short: state.recorded + " (unrecognized)",
+          label: "abstained: " + state.recorded + " (unrecognized)",
+          detail: "An abstainReason of “" + state.recorded + "” was recorded, "
+                + "and it is not one of the reasons this page knows ("
+                + reasonNames() + "). The producer wrote it down; what is "
+                + "missing is this page's meaning for it, not the value.",
+          repair: "Fix: either the grader is emitting a reason the contract "
+                + "does not define, or this page is older than the contract. "
+                + "scripts/validate_grading.py holds the list both sides are "
+                + "meant to agree on.",
+        };
+      }
+      return {
+        cls: "reason-missing",
+        short: "untyped",
+        label: "abstained: reason not recorded",
+        detail: "No abstainReason was recorded at all. An untyped abstention "
+              + "cannot be told from a judge that stopped ruling on anything.",
+        repair: "",
+      };
+    }
+
+    // A boolean `passed` with no `verdict` is not a malformed check — it is the
+    // PREVIOUS contract, and it is not translatable. Its `false` means either
+    // "verified false" or "could not tell", the two the contract change exists
+    // to separate, and picking one here would be inventing the very
+    // distinction the data does not carry. So it renders as unknown, with a
+    // banner naming the contract. The aggregator never lets one through; only a
+    // benchmark.json left over from before can carry these.
+    function isLegacyExpectation(exp) {
+      return !!exp && typeof exp === "object"
+        && typeof exp.verdict !== "string" && typeof exp.passed === "boolean";
+    }
+
+    function countLegacy(expectations) {
+      return (expectations || []).filter(isLegacyExpectation).length;
+    }
+
+    const LEGACY_VERDICT_WARNING =
+      "These checks were graded under the previous contract, which had only "
+      + "true/false. Its `false` means either “verified false” or "
+      + "“the judge could not tell”, and nothing in the file says "
+      + "which — so they are shown as unrecorded rather than guessed at. "
+      + "Re-grade the run, or migrate each entry to a verdict of pass, fail or "
+      + "abstain.";
+
+    // Rendered next to every rate, never instead of one.
+    function abstainNoteHtml(abstained, total) {
+      if (!isNum(abstained) || abstained <= 0) return "";
+      const of = isNum(total) && total > 0 ? " of " + total : "";
+      return '<span class="grade-abstain-note">' + escapeHtml(
+        abstained + of + " abstained — not counted in the rate") + "</span>";
+    }
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt. A null prompt means no eval_metadata.json and no transcript
+      // was found — say so rather than showing an empty panel.
+      const promptEl = document.getElementById("prompt-text");
+      if (run.prompt) {
+        promptEl.classList.remove("unknown");
+        promptEl.textContent = run.prompt;
+      } else {
+        promptEl.classList.add("unknown");
+        promptEl.textContent =
+          "Not recorded. No eval_metadata.json was found for this run, so the task "
+          + "it was given is unknown.";
+      }
+
+      // Layout notice. A run directory the aggregator will not accept — a
+      // `run-final/` instead of `run-1/` — used to render here as an ordinary
+      // run while being excluded from every benchmark number, so the two
+      // artifacts described different data and neither said so. The wording
+      // comes from generate_review.py, which is also what prints it to the
+      // terminal: one condition, one sentence.
+      const notice = document.getElementById("run-notice");
+      if (run.layout_note) {
+        notice.textContent = run.layout_note;
+        notice.style.display = "block";
+      } else {
+        notice.textContent = "";
+        notice.style.display = "none";
+      }
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        container.appendChild(buildFileCard(file));
+      }
+    }
+
+    function buildFileCard(file) {
+      const fileDiv = document.createElement("div");
+      fileDiv.className = "output-file";
+
+      // Always show file header with download link
+      const header = document.createElement("div");
+      header.className = "output-file-header";
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = file.name;
+      header.appendChild(nameSpan);
+      const dlBtn = document.createElement("a");
+      dlBtn.className = "dl-btn";
+      dlBtn.textContent = "Download";
+      dlBtn.download = file.name;
+      dlBtn.href = getDownloadUri(file);
+      header.appendChild(dlBtn);
+      fileDiv.appendChild(header);
+
+      const content = document.createElement("div");
+      content.className = "output-file-content";
+
+      // Every branch below assigns through a DOM property (textContent, .src,
+      // .href) rather than through markup, so output-file contents can never
+      // become live DOM no matter what they contain.
+      if (file.type === "text") {
+        const pre = document.createElement("pre");
+        pre.textContent = file.content;
+        content.appendChild(pre);
+      } else if (file.type === "image") {
+        const img = document.createElement("img");
+        img.src = file.data_uri;
+        img.alt = file.name;
+        content.appendChild(img);
+      } else if (file.type === "pdf") {
+        const iframe = document.createElement("iframe");
+        iframe.src = file.data_uri;
+        content.appendChild(iframe);
+      } else if (file.type === "xlsx") {
+        renderXlsx(content, file);
+      } else if (file.type === "binary") {
+        const a = document.createElement("a");
+        a.className = "download-link";
+        a.href = file.data_uri;
+        a.download = file.name;
+        a.textContent = "Download " + file.name;
+        content.appendChild(a);
+      } else if (file.type === "error") {
+        const pre = document.createElement("pre");
+        pre.textContent = file.content;
+        pre.style.color = "var(--red)";
+        content.appendChild(pre);
+      }
+
+      fileDiv.appendChild(content);
+      return fileDiv;
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, file) {
+      // The spreadsheet renderer is the one thing on this page that needs the
+      // network. When it is unavailable, offer the file instead of an error.
+      if (typeof XLSX === "undefined") {
+        const note = document.createElement("div");
+        note.className = "fallback-note";
+        note.textContent =
+          "The spreadsheet preview needs the SheetJS library, which could not be "
+          + "loaded (no network, or a blocked CDN). Download the file to open it.";
+        container.appendChild(note);
+        const a = document.createElement("a");
+        a.className = "download-link";
+        a.href = getDownloadUri(file);
+        a.download = file.name;
+        a.textContent = "Download " + file.name;
+        container.appendChild(a);
+        return;
+      }
+      try {
+        const raw = Uint8Array.from(atob(file.data_b64), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        const pre = document.createElement("pre");
+        pre.textContent = "Error rendering spreadsheet: " + err.message;
+        pre.style.color = "var(--red)";
+        container.appendChild(pre);
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      const hasGrading = !!run.grading;
+      // The section is ALWAYS shown. It used to hide itself when there was
+      // neither grading nor timing, so the one run in the workspace that was
+      // never graded — the run the benchmark excluded from every number —
+      // looked on this screen exactly like a run with nothing to report. The
+      // reviewer works through these screens; the exclusion has to be visible
+      // here, not only on a Benchmark tab they may never open.
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      let html = '<div style="padding: 1rem;">';
+
+      if (hasGrading) {
+        const grading = run.grading;
+        const summary = grading.summary || {};
+        const expectations = Array.isArray(grading.expectations) ? grading.expectations : [];
+
+        // Summary line. A pass_rate that was never written stays unknown; the
+        // 50-79% band gets its own badge instead of falling through unstyled.
+        //
+        // A null pass_rate now has a SECOND cause, and the two must not read
+        // alike: the grader may not have written one (unknown), or every
+        // expectation may have abstained, in which case the rate is null
+        // BECAUSE the denominator is zero — a recorded outcome, not a gap.
+        const rate = summary.pass_rate;
+        const abstained = summary.abstained;
+        const graded = (isNum(summary.passed) && isNum(summary.failed))
+          ? summary.passed + summary.failed : null;
+        const nothingGraded = graded === 0;
+        const passRateText = isNum(rate) ? Math.round(rate * 100) + "%"
+          : (nothingGraded ? "no rate" : UNKNOWN);
+        let badgeClass = nothingGraded ? "grade-abstain" : "grade-unknown";
+        if (isNum(rate)) {
+          badgeClass = rate >= 0.8 ? "grade-pass" : rate >= 0.5 ? "grade-partial" : "grade-fail";
+        }
+        html += '<div class="grades-summary">';
+        html += '<span class="grade-badge ' + badgeClass + '">' + escapeHtml(passRateText) + '</span>';
+        html += '<span>'
+          + orUnknown(summary.passed) + ' passed, '
+          + orUnknown(summary.failed) + ' failed, '
+          + orUnknown(abstained) + ' abstained of '
+          + orUnknown(summary.total) + '</span>';
+        html += abstainNoteHtml(abstained, summary.total);
+        html += '</div>';
+
+        if (nothingGraded) {
+          html += '<p class="unknown">' + escapeHtml(
+            "Every check in this run abstained, so there is no pass rate to "
+            + "report. This is not a score of zero: nothing was ruled against "
+            + "the run. Each check below carries the reason that applied and "
+            + "the repair that reason calls for.")
+            + '</p>';
+        }
+
+        const legacyCount = countLegacy(expectations);
+        if (legacyCount > 0) {
+          html += '<div class="benchmark-warning">' + escapeHtml(
+            legacyCount + " of these checks carry a true/false `passed` and no "
+            + "`verdict`. " + LEGACY_VERDICT_WARNING) + '</div>';
+        }
+
+        // Assertions list
+        html += '<ul class="assertion-list">';
+        for (const exp of expectations) {
+          const verdict = verdictOf(exp);
+          const statusClass = verdict || "";
+          const statusIcon = verdict ? VERDICT_ICON[verdict] : UNKNOWN;
+          html += '<li class="assertion-item">';
+          html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+          // An expectation with no text used to render as a bare checkmark
+          // that looked exactly like a normal pass.
+          if (exp.text) {
+            html += '<span>' + escapeHtml(exp.text) + '</span>';
+          } else {
+            html += '<span class="unknown">(this check has no text &mdash; the grader wrote no '
+              + '&ldquo;text&rdquo; field for it)</span>';
+          }
+          if (verdict === "abstain") {
+            // Everything on these three lines — the badge's colour, its
+            // wording, the meaning, the repair — comes out of ABSTAIN_REASONS.
+            // Schema-invalid gradings never reach a benchmark, so an
+            // unrecognized or absent reason means a hand-edited file, and the
+            // two are reported as the different things they are.
+            const badge = abstainBadge(abstainReasonState(exp));
+            html += '<span class="assertion-reason ' + badge.cls + '">'
+              + escapeHtml(badge.label) + '</span>';
+            html += '<div class="assertion-evidence">' + escapeHtml(badge.detail)
+              + '</div>';
+            if (badge.repair) {
+              html += '<div class="assertion-repair ' + badge.cls + '">'
+                + escapeHtml(badge.repair) + '</div>';
+            }
+          }
+          if (exp.evidence) {
+            html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+          }
+          html += '</li>';
+        }
+        html += '</ul>';
+
+        // Two words are kept apart on purpose: `assertions` in
+        // eval_metadata.json is the input set an author wrote; `expectations`
+        // in grading.json is what the grader returned. grader.md requires the
+        // second to be copied character-for-character from the first, and the
+        // Benchmark tab lines configurations up on exactly that text — but
+        // nothing anywhere checked the two against each other. When they
+        // diverge, the comparison table splits rows, and this is the screen
+        // that can say why.
+        html += renderAssertionDrift(run, expectations);
+      } else {
+        html += '<div class="grades-summary">';
+        html += '<span class="grade-badge grade-unknown">' + escapeHtml(UNKNOWN) + '</span>';
+        html += '<span>' + escapeHtml(UNKNOWN) + ' passed, ' + escapeHtml(UNKNOWN)
+          + ' failed, ' + escapeHtml(UNKNOWN) + ' abstained of '
+          + escapeHtml(UNKNOWN) + '</span>';
+        html += '</div>';
+        html += '<p class="unknown">' + escapeHtml(run.grading_note
+          || "No grading.json was found for this run, so it was never graded. This is not a "
+             + "score of zero: the checks were not run.") + '</p>';
+      }
+
+      // Per-run cost/duration. Absent timing.json renders as unknown, never 0.
+      const timing = run.timing || {};
+      html += '<div class="run-metrics">'
+        + 'tokens: ' + orUnknown(timing.total_tokens, v => escapeHtml(String(v)))
+        + '  |  duration: '
+        + orUnknown(timing.total_duration_seconds, v => escapeHtml(Number(v).toFixed(1) + "s"))
+        + (run.timing ? "" : '  (no timing.json in this run directory)')
+        + '</div>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    // Compare what the grader returned against what the eval declared, by the
+    // same rule the Benchmark tab aligns on: exact text.
+    function renderAssertionDrift(run, expectations) {
+      const declared = Array.isArray(run.assertions) ? run.assertions.filter(a => typeof a === "string") : null;
+      if (!declared || declared.length === 0) return "";
+
+      const graded = expectations.map(e => (e && typeof e.text === "string") ? e.text : "");
+      const gradedSet = new Set(graded.filter(Boolean));
+      const declaredSet = new Set(declared);
+
+      const notGraded = declared.filter(a => !gradedSet.has(a));
+      const notDeclared = graded.filter(t => t && !declaredSet.has(t));
+      const untexted = graded.filter(t => !t).length;
+      if (notGraded.length === 0 && notDeclared.length === 0 && untexted === 0) return "";
+
+      let out = '<div class="benchmark-warning">';
+      out += "<strong>" + escapeHtml("The graded checks do not match the checks this eval declared.")
+        + "</strong>";
+      out += "<ul>";
+      if (notGraded.length) {
+        out += "<li>" + escapeHtml(notGraded.length + " assertion(s) from eval_metadata.json have "
+          + "no exactly-matching entry in grading.json: ")
+          + [...new Set(notGraded)].slice(0, 5).map(t => "“" + escapeHtml(t) + "”").join(", ")
+          + (notGraded.length > 5 ? escapeHtml(" ...") : "") + "</li>";
+      }
+      if (notDeclared.length) {
+        out += "<li>" + escapeHtml(notDeclared.length + " graded check(s) are worded differently "
+          + "from anything this eval declared: ")
+          + [...new Set(notDeclared)].slice(0, 5).map(t => "“" + escapeHtml(t) + "”").join(", ")
+          + (notDeclared.length > 5 ? escapeHtml(" ...") : "") + "</li>";
+      }
+      if (untexted) {
+        out += "<li>" + escapeHtml(untexted + " graded check(s) carry no text at all.") + "</li>";
+      }
+      out += "</ul>";
+      out += "<p>" + escapeHtml("The Benchmark tab lines configurations up by exact text, so a "
+        + "reworded check appears as its own row with no counterpart. Have the grader copy each "
+        + "assertion character-for-character from eval_metadata.json.") + "</p>";
+      out += "</div>";
+      return out;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+      for (const file of prevOutputs) {
+        wrapper.appendChild(buildFileCard(file));
+      }
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then((resp) => {
+        // A rejected save used to print "Saved" all the same: the handler
+        // ignored the status and reported success for a 400 the server had
+        // just refused to write.
+        if (!resp.ok) {
+          return resp.json().catch(() => ({})).then((body) => {
+            document.getElementById("feedback-status").textContent =
+              "NOT saved: " + (body.error || ("the server refused the write (HTTP " + resp.status + ")"));
+          });
+        }
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      const message = document.getElementById("done-message");
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then((resp) => {
+        if (!resp.ok) {
+          // Carry the server's own reason into the fallback message. "save
+          // failed" told the reader nothing about a refusal it could act on.
+          return resp.json().catch(() => ({})).then((body) => {
+            throw new Error(body.error || ("the server refused the write (HTTP " + resp.status + ")"));
+          });
+        }
+        message.textContent =
+          "Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.";
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch((err) => {
+        // Server not available (static mode), or it refused the write —
+        // download as a file so the work is never lost either way.
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        message.textContent =
+          "A file called feedback.json has been downloaded to your browser's downloads folder. "
+          + "Go back to your Claude Code session, say you're done reviewing, and tell Claude where that file is."
+          + (err && err.message ? " (The viewer could not write it directly: " + err.message + ")" : "");
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Hide the dialog and nothing else.
+      //
+      // This used to call saveCurrentFeedback(), which POSTs only the
+      // non-empty entries and sets status back to "in_progress" — so clicking
+      // OK, the dialog's only button, silently undid the submission and
+      // deleted exactly the empty-feedback entries that let the model tell
+      // "reviewed, looked fine" apart from "never opened".
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark: statistics -------------------------------------------
+
+    // Port of aggregate_benchmark.calculate_stats: mean/stddev/min/max over the
+    // MEASURED entries, sample (n-1) deviation, and **stddev null at n=1**.
+    //
+    // It used to return 0 there while claiming in this very comment to match
+    // the aggregator. One sample has no sample standard deviation, and
+    // rendering "50% ± 0% n=1" is the aggregator's own worked example of the
+    // single most misleading thing this stack can emit: a spread that was never
+    // measured, printed as a measurement of no spread. adaptStat() one screen
+    // down already kept it null, so the two paths through one file disagreed
+    // about the same number depending on whether run_summary was usable.
+    //
+    // Rounding matches too (4 decimals), so a value recomputed here and the
+    // same value read from benchmark.json cannot print differently.
+    function round4(v) {
+      return Math.round(v * 10000) / 10000;
+    }
+
+    function stats(values) {
+      const xs = values.filter(isNum);
+      if (xs.length === 0) return null;
+      const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+      let stddev = null;
+      if (xs.length > 1) {
+        const variance = xs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (xs.length - 1);
+        stddev = round4(Math.sqrt(variance));
+      }
+      return {
+        mean: round4(mean),
+        stddev,
+        min: round4(Math.min(...xs)),
+        max: round4(Math.max(...xs)),
+        n: xs.length,
+        missing: values.length - xs.length,
+      };
+    }
+
+    // ---- Exclusion kinds --------------------------------------------------
+    //
+    // "Excluded" is not one thing any more, and a single blanket sentence
+    // about it is now wrong in a way that reads as a bug in the page: a
+    // reader who sees a run listed as excluded, then sees a pass rate that
+    // plainly includes it, concludes the numbers cannot be trusted — when the
+    // page is in fact being precise and the banner is the only imprecise part.
+    //
+    // Three kinds, and the page has to name which is which:
+    //
+    //   dropped   the whole run is out of every figure (schema-invalid
+    //             grading.json, undiscoverable grading, a misnamed run dir)
+    //   timing    only timing.json was rejected: the tokens and time cells go
+    //             to UNKNOWN and the run's grading still counts everywhere
+    //   pairing   out of the delta only: an eval or run whose counterpart is
+    //             missing still counts toward its own configuration's column
+    //
+    // Classified from the two stable fields, never from the prose. The
+    // condition tag `C12:<condition>=<severity>` is the token every component
+    // prints for exactly this purpose (scripts/utils.py), and the filename is
+    // the canonical one. Matching on the sentence would break the next
+    // time someone improves the wording, which is precisely how the three
+    // components drifted apart before the shared tag existed.
+    function hasCondition(reason, condition) {
+      return String(reason == null ? "" : reason).indexOf("C12:" + condition + "=") !== -1;
+    }
+
+    function baseName(path) {
+      const parts = String(path == null ? "" : path).split(/[\\/]/);
+      return parts[parts.length - 1];
+    }
+
+    function exclusionKind(item) {
+      const reason = item && item.reason;
+      if (hasCondition(reason, "unpaired_evals")) return "pairing";
+      if (baseName(item && item.path) === "timing.json") return "timing";
+      return "dropped";
+    }
+
+    // Heading per kind. Each states what was excluded FROM WHAT, in the same
+    // words the aggregator uses for the same condition.
+    const EXCLUSION_GROUPS = [
+      {
+        kind: "dropped",
+        heading: (n) => n + (n === 1 ? " run was" : " runs were")
+          + " excluded from every number on this page.",
+      },
+      {
+        kind: "timing",
+        heading: (n) => n + (n === 1 ? " run has" : " runs have")
+          + " an unusable timing.json. Only the timing was dropped: the Time and Tokens"
+          + " cells read " + UNKNOWN + " for "
+          + (n === 1 ? "that run" : "those runs") + ", and "
+          + (n === 1 ? "its" : "their") + " grading still counts in every pass rate.",
+      },
+      {
+        kind: "pairing",
+        heading: (n) => n + (n === 1 ? " run or eval is" : " runs or evals are")
+          + " excluded from the Change column only. "
+          + (n === 1 ? "It still counts" : "They still count")
+          + " toward "
+          + (n === 1 ? "its" : "their")
+          + " own configuration's column, so the two columns and the Change"
+          + " column do not cover the same data.",
+      },
+    ];
+
+    function renderExclusions(exclusions) {
+      let html = "";
+      for (const group of EXCLUSION_GROUPS) {
+        const items = exclusions.filter(item => exclusionKind(item) === group.kind);
+        if (!items.length) continue;
+        html += '<div class="benchmark-warning"><strong>'
+          + escapeHtml(group.heading(items.length)) + "</strong><ul>";
+        for (const item of items) {
+          html += "<li>" + escapeHtml(String((item && item.path) || "(unnamed)"))
+            + " &mdash; " + escapeHtml(String((item && item.reason) || "no reason given"));
+          const errs = (item && Array.isArray(item.errors)) ? item.errors : [];
+          if (errs.length) {
+            html += "<ul>" + errs.map(e => "<li>" + escapeHtml(String(e)) + "</li>").join("") + "</ul>";
+          }
+          html += "</li>";
+        }
+        html += "</ul></div>";
+      }
+      return html;
+    }
+
+    // Comparison direction is by ROLE, never by sort order.
+    // benchmark.json declares "primary" and "baseline".
+    //
+    // A declared NULL is not a missing declaration. When the configuration
+    // under test produced no usable run, the aggregator writes `primary: null`
+    // and leaves the survivor labelled baseline **on purpose** — it exits
+    // non-zero and says so: "a surviving baseline is not promoted to primary,
+    // because the result would read as a report about the configuration under
+    // test when the configuration under test produced nothing." Inferring a
+    // primary here would undo that refusal in the one place the user actually
+    // looks. So: absent key -> infer (old and hand-written benchmarks);
+    // present-and-null -> honour the refusal; named -> use it.
+    const PRIMARY_NAMES = ["with_skill", "new_skill"];
+    const BASELINE_NAMES = ["without_skill", "old_skill", "baseline"];
+
+    function resolveRoles(configs, data) {
+      const known = new Set(configs);
+      const primaryRefused = "primary" in data && data.primary === null;
+      const baselineRefused = "baseline" in data && data.baseline === null;
+      let primary = known.has(data.primary) ? data.primary : null;
+      let baseline = known.has(data.baseline) ? data.baseline : null;
+      const declared = !!(primary && baseline);
+      if (!primary && !primaryRefused) {
+        primary = configs.find(c => PRIMARY_NAMES.includes(c)) || null;
+      }
+      if (!baseline && !baselineRefused) {
+        baseline = configs.find(c => BASELINE_NAMES.includes(c) && c !== primary) || null;
+      }
+      if (!primary && !primaryRefused) primary = configs.find(c => c !== baseline) || null;
+      if (!baseline && !baselineRefused) baseline = configs.find(c => c !== primary) || null;
+      return { primary, baseline, declared, primaryRefused, baselineRefused };
+    }
+
+    // Each metric declares its polarity, and the presentation
+    // colours by goodness. A skill that is 10 seconds faster shows a negative
+    // delta and must still be green.
+    function deltaClass(value, lowerIsBetter) {
+      if (!isNum(value) || value === 0) return "";
+      const better = lowerIsBetter ? value < 0 : value > 0;
+      return better ? "benchmark-delta-better" : "benchmark-delta-worse";
+    }
+
+    // Signed delta text in the units of the row it sits in, so a change never
+    // appears in different units from the two values it is the difference of.
+    function deltaText(value, opts) {
+      const o = opts || {};
+      const sign = value >= 0 ? "+" : "";
+      if (o.pct) return sign + (value * 100).toFixed(0) + "%";
+      return sign + value.toFixed(o.digits == null ? 1 : o.digits) + (o.suffix || "");
+    }
+
+    function fmtDelta(value, opts) {
+      if (!isNum(value)) return UNKNOWN_HTML;
+      const o = opts || {};
+      return '<span class="' + deltaClass(value, o.lowerIsBetter) + '">'
+        + escapeHtml(deltaText(value, o)) + "</span>";
+    }
+
+    // benchmark.json declares each delta as
+    //   {value, formatted, polarity, better}
+    // where `better` is true / false / null-when-unknown. That declaration is
+    // authoritative: the aggregator knows each metric's polarity, so the
+    // viewer must read `better` rather than re-deriving goodness from the
+    // sign. `null` colours as neither good nor bad.
+    function renderDelta(entry, opts) {
+      const o = opts || {};
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        if (!isNum(entry.value)) return UNKNOWN_HTML;
+        const cls = entry.better === true ? "benchmark-delta-better"
+          : entry.better === false ? "benchmark-delta-worse" : "";
+        // `value` is authoritative and identical to what benchmark.md printed;
+        // it is re-formatted here into this row's units (the stored
+        // `formatted` string is a bare fraction, which reads wrong beside a
+        // column of percentages or seconds).
+        return '<span class="' + cls + '">' + escapeHtml(deltaText(entry.value, o)) + "</span>";
+      }
+      // A hand-written or older benchmark.json may carry the bare formatted
+      // string. Colour it here from the metric's own polarity.
+      if (typeof entry === "string") {
+        const n = parseFloat(entry);
+        if (!isNum(n)) return UNKNOWN_HTML;
+        return '<span class="' + deltaClass(n, o.lowerIsBetter) + '">' + escapeHtml(entry) + "</span>";
+      }
+      if (isNum(o.computed)) return fmtDelta(o.computed, o);
+      return UNKNOWN_HTML;
+    }
+
+    function fmtStat(stat, opts) {
+      // stddev is null at n=1 and any metric block may be null outright, so
+      // nothing here may call .toFixed() without checking first.
+      if (!stat || !isNum(stat.mean)) return UNKNOWN_HTML;
+      const o = opts || {};
+      const digits = o.digits == null ? 1 : o.digits;
+      const fmt = v => o.pct ? (v * 100).toFixed(0) + "%" : v.toFixed(digits) + (o.suffix || "");
+      let text = fmt(stat.mean);
+      if (isNum(stat.stddev)) text += " ± " + fmt(stat.stddev);
+      let out = escapeHtml(text);
+      const parts = [];
+      if (isNum(stat.n)) parts.push("n=" + stat.n);
+      // For a pass rate, a missing value is not an unrecorded one: the run was
+      // graded, and every expectation in it abstained, so there is no rate.
+      // Filing that under "not recorded" says nobody looked.
+      if (isNum(stat.missing) && stat.missing > 0) {
+        parts.push(stat.missing + (o.pct ? " with no rate" : " not recorded"));
+      }
+      // n=1 already says why there is no spread; anything else needs saying.
+      if (!isNum(stat.stddev) && stat.n !== 1) parts.push("spread " + UNKNOWN);
+      if (parts.length) out += '<span class="metric-note">' + escapeHtml(parts.join(", ")) + "</span>";
+      return out;
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = Array.isArray(data.notes) ? data.notes : [];
+      const runs = Array.isArray(data.runs) ? data.runs : [];
+      const exclusions = Array.isArray(data.exclusions) ? data.exclusions : [];
+      const layoutWarnings = Array.isArray(data.layout_warnings) ? data.layout_warnings : [];
+      const delta = (summary.delta && typeof summary.delta === "object") ? summary.delta : {};
+
+      let html = "";
+      const warnings = [];
+
+      // Header. Every one of these is a model-authored string from
+      // benchmark.json and every one of them used to reach innerHTML raw.
+      html += "<h2 style='font-family: var(--font-sans); margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += escapeHtml(metadata.timestamp) + " &mdash; ";
+      if (Array.isArray(metadata.evals_run) && metadata.evals_run.length) {
+        html += "Evals: " + escapeHtml(metadata.evals_run.join(", ")) + " &mdash; ";
+      }
+      // runs_per_configuration is null when the configurations disagree about
+      // how many runs they had. That is a fact worth stating, not a blank.
+      const rpc = metadata.runs_per_configuration;
+      const byConfig = metadata.runs_per_configuration_by_config;
+      if (isNum(rpc)) {
+        html += escapeHtml(String(rpc)) + (rpc === 1 ? " run" : " runs") + " per configuration";
+      } else if (byConfig && typeof byConfig === "object") {
+        html += "uneven run counts ("
+          + escapeHtml(Object.keys(byConfig).map(k => labelFor(k) + ": " + byConfig[k]).join(", "))
+          + ")";
+      } else {
+        html += "runs per configuration " + UNKNOWN;
+      }
+      html += "</p>";
+
+      // Anything the aggregator dropped or normalized is shown before the
+      // numbers, not after them. A clean-looking table computed from partial
+      // data is the failure this rewrite exists to close.
+      // Grouped by what each exclusion was excluded FROM. One blanket
+      // "excluded from every number" sentence covered three different things,
+      // two of them partial.
+      html += renderExclusions(exclusions);
+      if (layoutWarnings.length) {
+        html += '<div class="benchmark-warning"><strong>'
+          + escapeHtml(layoutWarnings.length
+            + (layoutWarnings.length === 1 ? " layout warning" : " layout warnings")
+            + " while reading the workspace.")
+          + "</strong><ul>"
+          + layoutWarnings.map(w => "<li>" + escapeHtml(String(w)) + "</li>").join("")
+          + "</ul></div>";
+      }
+
+      // Which configurations are we comparing, and in which direction?
+      let configs = Object.keys(summary).filter(k => k !== "delta");
+      if (runs.length) {
+        const fromRuns = [...new Set(runs.map(r => r.configuration).filter(c => c != null))];
+        if (fromRuns.length) configs = fromRuns;
+      }
+
+      if (configs.length === 0) {
+        html += '<div class="benchmark-warning">This benchmark contains no configurations. '
+          + 'Nothing was aggregated &mdash; check that the results are in the canonical '
+          + 'layout (eval-&lt;ID&gt;/&lt;config&gt;/run-&lt;K&gt;/grading.json).</div>';
+        container.innerHTML = html;
+        return;
+      }
+
+      const roles = resolveRoles(configs, data);
+      const primary = roles.primary;
+      const baseline = roles.baseline;
+      // Only worth saying when there are in fact two roles to have inferred.
+      // With one configuration the next warning is the accurate one, and this
+      // one printed an empty name in curly quotes.
+      if (!roles.declared && primary && baseline && primary !== baseline) {
+        warnings.push(
+          "benchmark.json does not declare which configuration is the primary and which is the "
+          + "baseline. Roles were inferred from the configuration names: “"
+          + labelFor(primary) + "” is treated as the primary and “" + labelFor(baseline)
+          + "” as the baseline. Every change below is primary minus baseline."
+        );
+      }
+      if (roles.primaryRefused && baseline) {
+        // The strongest statement the page can make, and it has to be first:
+        // the configuration under test produced nothing. What survives is the
+        // BASELINE — the thing being compared against — so every figure below
+        // describes the control, not the subject. The aggregator refuses to
+        // promote it and exits non-zero; presenting it under a "primary"
+        // heading here would quietly undo that.
+        warnings.push(
+          "This is not a comparison. No primary configuration produced a usable run, so "
+          + "benchmark.json names none. The one configuration below, “" + labelFor(baseline)
+          + "”, is the baseline: it is what the skill was to be measured AGAINST, not the "
+          + "skill under test. Every figure here describes that baseline, the Change column "
+          + "reads " + UNKNOWN + " throughout, and the aggregation exited non-zero. Check the "
+          + "exclusions above for what happened to the primary configuration's runs."
+        );
+      } else if (!primary || !baseline || primary === baseline) {
+        // Naming what WAS found matters: a run directory the aggregator refused
+        // (a `run-final/` instead of `run-1/`) drops a whole configuration from
+        // the benchmark. "Only one configuration was found" over a table headed
+        // with a role is a fact the reader needs spelled out.
+        warnings.push(
+          "Only one configuration is present in this benchmark ("
+          + configs.map(labelFor).join(", ") + "), so there is nothing to compare against and "
+          + "the Change column reads " + UNKNOWN + " throughout. If you expected two, a "
+          + "configuration was dropped before aggregation — check the exclusions above and "
+          + "that every run directory is named run-<K> with an integer K."
+        );
+      }
+      if (warnings.length) {
+        html += warnings.map(w => '<div class="benchmark-warning">' + escapeHtml(w) + "</div>").join("");
+      }
+
+      // Per-config metric collections. run_summary is authoritative when it is
+      // present — it is what benchmark.md prints, and the two must not
+      // disagree — and it already carries n and missing counts. Recomputing
+      // from runs[] is the fallback for a hand-written benchmark.json. Either
+      // way an unmeasured value stays null and never becomes 0.
+      const metrics = {};
+      const rejectedSummaries = [];
+      for (const config of configs) {
+        const configRuns = runs.filter(r => r.configuration === config);
+        const results = configRuns.map(r => r.result || {});
+        const stored = summary[config] || {};
+        // When a stored block exists but is not usable, saying so is part of
+        // the answer: the numbers below were recomputed from runs[] and are no
+        // longer the numbers benchmark.md printed.
+        const pick = (key) => {
+          const adapted = adaptStat(stored[key]);
+          if (adapted) return adapted;
+          if (stored[key] !== undefined && stored[key] !== null) {
+            rejectedSummaries.push(labelFor(config) + " / " + key);
+          }
+          return results.length ? stats(results.map(r => nullable(r[key]))) : null;
+        };
+        metrics[config] = {
+          runCount: isNum(stored.runs) ? stored.runs : configRuns.length,
+          passRate: pick("pass_rate"),
+          // The micro-average is not in benchmark.json; only the viewer has it.
+          micro: microAverage(results),
+          time: pick("time_seconds"),
+          tokens: pick("tokens"),
+        };
+      }
+
+      const pm = metrics[primary] || {};
+      const bm = metrics[baseline] || {};
+
+      // Where the numbers below came from. Silently recomputing produced a
+      // table that disagreed with benchmark.md with nothing on the page to
+      // explain why.
+      if (!data.run_summary || typeof data.run_summary !== "object") {
+        html += '<div class="benchmark-warning">'
+          + escapeHtml("benchmark.json carries no run_summary block, so every figure below "
+            + "was recomputed from runs[] by this page. That is the honest source, but it is "
+            + "not what benchmark.md printed.")
+          + "</div>";
+      } else if (rejectedSummaries.length) {
+        html += '<div class="benchmark-warning">'
+          + escapeHtml("The aggregator's own summary could not be used for "
+            + [...new Set(rejectedSummaries)].join(", ")
+            + " (the mean was missing or not a number). Those figures were recomputed from "
+            + "runs[] instead, so they may not match benchmark.md.")
+          + "</div>";
+      }
+
+      html += '<table class="benchmark-table">';
+      // A null role is a missing configuration, not a nameless one. An empty
+      // <th> above a column of dashes reads as a rendering glitch — and where
+      // the aggregator explicitly declined to name the role, the heading says
+      // why rather than implying the file simply forgot to.
+      const roleHead = (c, refused) => escapeHtml(
+        c ? labelFor(c) : (refused ? "(none produced a usable run)" : "(none found)"));
+      html += "<thead><tr><th>Metric</th>"
+        + "<th>" + roleHead(primary, roles.primaryRefused) + "<span class='role'>primary</span></th>"
+        + "<th>" + roleHead(baseline, roles.baselineRefused) + "<span class='role'>baseline</span></th>"
+        + "<th>Change<span class='role'>primary &minus; baseline</span></th></tr></thead>";
+      html += "<tbody>";
+
+      // Headline pass rate: the micro-average over every assertion actually
+      // graded. The old headline was the mean of per-run rates with no label,
+      // so a benchmark with one big eval and one small one was dominated by
+      // the small one (10 assertions at 50% + 2 at 100% read as 75%, not 58%).
+      const pMicro = pm.micro, bMicro = bm.micro;
+      html += "<tr><td><strong>Pass rate</strong>"
+        + "<span class='metric-note'>every graded check, pooled</span></td>";
+      html += "<td>" + fmtMicro(pMicro) + "</td>";
+      html += "<td>" + fmtMicro(bMicro) + "</td>";
+      // A side with no graded check has no rate, so there is no difference to
+      // take. `0 - 0` would print `0 pp` and read as "no change".
+      html += "<td>" + ((pMicro && bMicro && isNum(pMicro.rate) && isNum(bMicro.rate))
+        ? fmtDelta(pMicro.rate - bMicro.rate, { pct: true, lowerIsBetter: false })
+        : UNKNOWN_HTML) + "</td></tr>";
+
+      // Abstentions get a row of their own, with no Change cell. Every other
+      // row here declares a direction; abstention has no honest one — a judge
+      // that abstains freely produces a benchmark measuring nothing while
+      // looking rigorous, and a judge that never abstains is the defect the
+      // abstain verdict closed. Signing this number either way would be the page taking a side
+      // the data does not support.
+      // Shown whenever there are counts at all, including when the answer is
+      // zero. benchmark.md prints the section unconditionally for the same
+      // reason: an absent row cannot be told from "this page does not show
+      // abstentions", and the two renderings of one file must not disagree
+      // about what they disclose.
+      if (pMicro || bMicro) {
+        const fmtAbstain = (m) => {
+          if (!m) return UNKNOWN_HTML;
+          const pct = m.total > 0
+            ? " (" + ((m.abstained / m.total) * 100).toFixed(0) + "%)" : "";
+          return '<span class="benchmark-abstain">'
+            + escapeHtml(m.abstained + " of " + m.total + pct) + "</span>"
+            + '<span class="metric-note">'
+            + escapeHtml(m.graded + " ruled on") + "</span>";
+        };
+        html += "<tr><td><strong>Abstained</strong>"
+          + "<span class='metric-note'>declined, not failed &mdash; no direction is better</span></td>";
+        html += "<td>" + fmtAbstain(pMicro) + "</td>";
+        html += "<td>" + fmtAbstain(bMicro) + "</td>";
+        html += "<td>" + UNKNOWN_HTML + "</td></tr>";
+      }
+
+      // The macro-average is still worth showing — it is what tells you
+      // whether the runs agreed with each other — but only when it is labelled.
+      const macroComputed = (pm.passRate && bm.passRate && isNum(pm.passRate.mean) && isNum(bm.passRate.mean))
+        ? pm.passRate.mean - bm.passRate.mean : null;
+      html += "<tr><td><strong>Pass rate per run</strong>"
+        + "<span class='metric-note'>mean &plusmn; sd across runs</span></td>";
+      html += "<td>" + fmtStat(pm.passRate, { pct: true }) + "</td>";
+      html += "<td>" + fmtStat(bm.passRate, { pct: true }) + "</td>";
+      html += "<td>" + renderDelta(delta.pass_rate,
+        { pct: true, lowerIsBetter: false, computed: macroComputed }) + "</td></tr>";
+
+      // Time and tokens are lower-is-better, so the arithmetic sign and the
+      // goodness point in opposite directions. renderDelta reads the
+      // aggregator's `better` flag rather than guessing from the sign.
+      if (pm.time || bm.time || hasKey(runs, "time_seconds") || summaryHas(summary, "time_seconds")) {
+        const computed = (pm.time && bm.time && isNum(pm.time.mean) && isNum(bm.time.mean))
+          ? pm.time.mean - bm.time.mean : null;
+        html += "<tr><td><strong>Time</strong>"
+          + "<span class='metric-note'>seconds &mdash; lower is better</span></td>";
+        html += "<td>" + fmtStat(pm.time, { suffix: "s" }) + "</td>";
+        html += "<td>" + fmtStat(bm.time, { suffix: "s" }) + "</td>";
+        html += "<td>" + renderDelta(delta.time_seconds,
+          { suffix: "s", lowerIsBetter: true, computed }) + "</td></tr>";
+      }
+
+      if (pm.tokens || bm.tokens || hasKey(runs, "tokens") || summaryHas(summary, "tokens")) {
+        const computed = (pm.tokens && bm.tokens && isNum(pm.tokens.mean) && isNum(bm.tokens.mean))
+          ? pm.tokens.mean - bm.tokens.mean : null;
+        html += "<tr><td><strong>Tokens</strong>"
+          + "<span class='metric-note'>lower is better</span></td>";
+        html += "<td>" + fmtStat(pm.tokens, { digits: 0 }) + "</td>";
+        html += "<td>" + fmtStat(bm.tokens, { digits: 0 }) + "</td>";
+        html += "<td>" + renderDelta(delta.tokens,
+          { digits: 0, lowerIsBetter: true, computed }) + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+      html += '<p class="benchmark-caption">'
+        + '<strong>Pass rate</strong> pools every check the judge ruled on, from every run: if 7 of 12 '
+        + 'ruled-on checks passed it reads 58%. '
+        + '<strong>Pass rate per run</strong> averages the per-run scores instead, so it says how much the runs '
+        + 'disagreed with each other. They differ whenever some tests have more checks than others. '
+        + '<strong>Abstained</strong> checks are the ones the judge declined to rule on; they are in neither '
+        + 'the numerator nor the denominator, so a high rate over a small ruled-on fraction is a weak result, '
+        + 'not a strong one. '
+        + escapeHtml(UNKNOWN) + ' means the value was never recorded &mdash; it is not a zero, and '
+        + '&ldquo;no rate&rdquo; means nothing was ruled on at all.</p>';
+
+      // Per-eval breakdown (if runs data available)
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort(compareEvalIds);
+
+        html += "<h3 style='font-family: var(--font-sans); margin-bottom: 0.75rem;'>Test-by-test detail</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        // There is deliberately no crash/error column. Its only source was an
+        // execution_metrics block fed by a metrics.json that nothing writes, so
+        // it was permanently unmeasurable — and a permanently-empty column reads
+        // as "we measured this and found nothing", which is the same false
+        // confidence as the all-zero benchmark. It comes back when a producer does.
+
+        // Order configurations by role so every table reads primary first.
+        const orderedConfigs = [primary, baseline]
+          .concat(configs.filter(c => c !== primary && c !== baseline))
+          .filter(c => c != null);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const named = evalRuns.find(r => r.eval_name);
+          const evalName = named ? named.eval_name
+            : (evalId == null ? "Unidentified test" : "Eval " + evalId);
+
+          html += "<h4 style='font-family: var(--font-sans); margin: 1rem 0 0.5rem; color: var(--text);'>"
+            + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th><th>Abstained</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          const configGroups = orderedConfigs.filter(c => evalRuns.some(r => r.configuration === c));
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = config === baseline ? "benchmark-row-without" : "benchmark-row-with";
+            const configLabel = escapeHtml(labelFor(config));
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const rate = nullable(r.pass_rate);
+              const runGraded = (isNum(r.passed) && isNum(r.failed))
+                ? r.passed + r.failed : null;
+              const prClass = !isNum(rate)
+                ? (runGraded === 0 ? "benchmark-abstain" : "")
+                : rate >= 0.8 ? "benchmark-delta-better"
+                : rate < 0.5 ? "benchmark-delta-worse" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + orUnknown(run.run_number) + "</td>";
+              // The denominator is the ruled-on count, not `total`. Printing
+              // "2/11" beside a rate computed over 2 checks said the run was
+              // graded 2 out of 11 and scored 100%, which is two different
+              // numbers wearing one slash.
+              html += '<td class="' + prClass + '">'
+                + (isNum(rate) ? escapeHtml((rate * 100).toFixed(0) + "%")
+                   : runGraded === 0 ? escapeHtml("no rate") : UNKNOWN_HTML)
+                + " (" + orUnknown(r.passed) + "/"
+                + (runGraded === null ? UNKNOWN_HTML : escapeHtml(String(runGraded)))
+                + " ruled on)</td>";
+              html += '<td class="' + (isNum(r.abstained) && r.abstained > 0 ? "benchmark-abstain" : "") + '">'
+                + orUnknown(nullable(r.abstained)) + "/" + orUnknown(nullable(r.total)) + "</td>";
+              if (hasTime) html += "<td>" + orUnknown(nullable(r.time_seconds), v => escapeHtml(v.toFixed(1))) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rateStat = stats(configRuns.map(r => nullable((r.result || {}).pass_rate)));
+            const avgPrClass = !rateStat ? ""
+              : rateStat.mean >= 0.8 ? "benchmark-delta-better"
+              : rateStat.mean < 0.5 ? "benchmark-delta-worse" : "";
+            const evalMicro = microAverage(configRuns.map(r => r.result || {}));
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">'
+              + (rateStat ? escapeHtml((rateStat.mean * 100).toFixed(0) + "%") : UNKNOWN_HTML) + "</td>";
+            html += '<td class="' + (evalMicro && evalMicro.abstained > 0 ? "benchmark-abstain" : "") + '">'
+              + (evalMicro ? escapeHtml(evalMicro.abstained + "/" + evalMicro.total) : UNKNOWN_HTML)
+              + "</td>";
+            if (hasTime) {
+              const timeStat = stats(configRuns.map(r => nullable((r.result || {}).time_seconds)));
+              html += "<td>" + (timeStat ? escapeHtml(timeStat.mean.toFixed(1)) : UNKNOWN_HTML) + "</td>";
+            }
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          html += renderAssertionTable(evalRuns, configGroups);
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Per-assertion comparison ----------------------------------------
+    //
+    // ALIGNMENT RULE: exact string equality on `expectations[].text`. One rule,
+    // and it is the one every other party in this bundle already states —
+    // references/schemas.md §2 and §6, agents/grader.md constraint 4, and
+    // agents/analyzer.md all say the comparison lines expectations up by exact
+    // text, and grader.md requires the text be copied character-for-character
+    // from eval_metadata.json's `assertions`.
+    //
+    // This code previously keyed on `exp.id` with a fallback to the expectation's
+    // POSITION in the array, and told the reader "Same check, matched by
+    // position". Two things were wrong with that. `exp.id` has no producer
+    // anywhere — not in grader.md's output block, not in schemas.md, and
+    // validate_grading.py has never heard of it — so the positional branch
+    // always ran. And positional alignment is only sound if something
+    // guarantees the two graders returned their expectations in the same order.
+    // Nothing does: each configuration is graded by its own sub-agent. Two
+    // graders returning the same two checks in opposite order rendered as two
+    // rows in which both configurations agreed — ✓✓ and ✗✗ — when in truth each
+    // had passed a different check. No warning, no error, and the table read as
+    // ordinary.
+    //
+    // Positional matching had been introduced to fix a VISIBLE defect: a
+    // reworded assertion split into two half-empty rows. It replaced that with
+    // an INVISIBLE one. Between a wrong row a reader can see and a wrong row a
+    // reader cannot, take the visible one — and then explain it. Wording drift
+    // now produces two rows, each flagged with the other's wording, so the
+    // reader is told which two rows are probably one check and why they were
+    // not merged.
+    function assertionKey(exp) {
+      const text = (exp && typeof exp.text === "string") ? exp.text : "";
+      if (text) return "text:" + text;
+      return null;  // no text -> not alignable; see below
+    }
+
+    // Loose comparison used ONLY to SUGGEST that two unmatched rows may be the
+    // same check worded twice. It never merges anything — alignment stays
+    // exact — so a false suggestion costs a sentence and a missed one costs the
+    // reader the explanation for why a row is half empty.
+    //
+    // Case, punctuation and a short stopword list go, because the drift that
+    // was actually observed is an article: "Output is a CSV file" against "The
+    // output is a CSV file". Comparing normalized STRINGS misses exactly that;
+    // comparing token sets catches it while keeping "No blank rows" and "No
+    // blank columns" apart (Jaccard 0.5, under the threshold).
+    const ASSERTION_STOPWORDS = new Set([
+      "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+      "of", "to", "in", "on", "at", "it", "its", "that", "this", "there",
+    ]);
+
+    function assertionTokens(text) {
+      const words = String(text)
+        .toLowerCase()
+        .replace(/[‘’]/g, "'")
+        .replace(/[“”]/g, '"')
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim()
+        .split(/\s+/)
+        .filter(w => w && !ASSERTION_STOPWORDS.has(w));
+      return new Set(words);
+    }
+
+    function assertionSimilarity(a, b) {
+      if (a.size === 0 || b.size === 0) return 0;
+      let shared = 0;
+      for (const w of a) if (b.has(w)) shared += 1;
+      return shared / (a.size + b.size - shared);
+    }
+
+    // High enough that two genuinely different checks sharing most of their
+    // words stay apart, low enough to catch an article or a pluralization.
+    const ASSERTION_DRIFT_THRESHOLD = 0.75;
+
+    function renderAssertionTable(evalRuns, configGroups) {
+      const byConfig = {};
+      let any = false;
+      for (const config of configGroups) {
+        byConfig[config] = evalRuns.filter(
+          r => r.configuration === config && Array.isArray(r.expectations) && r.expectations.length > 0);
+        if (byConfig[config].length) any = true;
+      }
+      if (!any) return "";
+
+      const order = [];
+      const texts = {};   // key -> the one exact text this row is keyed by
+      const cells = {};   // key -> config -> [{verdict, reason, evidence, run_number}]
+      const sources = {}; // key -> Set of grading.json files it came from
+      let untextedCount = 0;
+      let abstainCount = 0;
+      let legacyCount = 0;
+      // Which reasons this eval actually produced, so the legend under the
+      // table names those and only those. Keyed by the badge's short form, so
+      // an unrecognized value gets its own entry instead of being pooled with
+      // the untyped one.
+      const seenBadges = new Map();
+
+      for (const config of configGroups) {
+        for (let ri = 0; ri < byConfig[config].length; ri++) {
+          const run = byConfig[config][ri];
+          const source = config + "#" + ri;
+          run.expectations.forEach((exp, i) => {
+            let key = assertionKey(exp);
+            if (key === null) {
+              // An expectation with no text cannot be aligned with anything —
+              // there is nothing to compare. Giving it a key derived from its
+              // position would align it with whatever happened to sit at the
+              // same index in the other configuration, which is the guess this
+              // rewrite exists to stop making. It gets a row of its own.
+              key = "notext:" + config + ":" + (run.run_number == null ? "?" : run.run_number)
+                + ":" + i;
+              untextedCount += 1;
+            }
+            if (!(key in cells)) {
+              order.push(key);
+              cells[key] = {};
+              texts[key] = (exp && typeof exp.text === "string") ? exp.text : "";
+              sources[key] = new Set();
+            }
+            sources[key].add(source);
+            if (!cells[key][config]) cells[key][config] = [];
+            const verdict = verdictOf(exp);
+            let badge = null;
+            if (verdict === "abstain") {
+              abstainCount += 1;
+              badge = abstainBadge(abstainReasonState(exp));
+              if (!seenBadges.has(badge.short)) seenBadges.set(badge.short, badge);
+            }
+            if (isLegacyExpectation(exp)) legacyCount += 1;
+            cells[key][config].push({
+              verdict: verdict,
+              badge: badge,
+              evidence: exp.evidence || "",
+              run_number: run.run_number,
+            });
+          });
+        }
+      }
+
+      // Which rows are missing at least one configuration? Those are the rows
+      // where wording drift shows up, and where a same-check suggestion is
+      // worth making.
+      const configsWithData = configGroups.filter(c => byConfig[c].length > 0);
+      const unmatched = order.filter(
+        key => texts[key] && configsWithData.some(c => !cells[key][c]));
+      const driftPartners = {};
+      for (const key of unmatched) {
+        const tokens = assertionTokens(texts[key]);
+        if (tokens.size === 0) continue;
+        for (const other of unmatched) {
+          if (other === key) continue;
+          if (assertionSimilarity(tokens, assertionTokens(texts[other]))
+              < ASSERTION_DRIFT_THRESHOLD) continue;
+          // Two rows that came out of the SAME grading.json are two checks that
+          // one grader deliberately listed separately, however similar they
+          // look. Only rows from different grader outputs can be drift.
+          const sameGrader = [...sources[key]].some(s => sources[other].has(s));
+          if (sameGrader) continue;
+          (driftPartners[key] = driftPartners[key] || []).push(texts[other]);
+        }
+      }
+
+      let html = '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+      html += "<thead><tr><th>What we checked</th>";
+      for (const config of configGroups) {
+        html += "<th>" + escapeHtml(labelFor(config)) + "</th>";
+      }
+      html += "</tr></thead><tbody>";
+
+      for (const key of order) {
+        html += "<tr><td>";
+        if (!texts[key]) {
+          html += '<span class="unknown">(this check has no text &mdash; the grader wrote no '
+            + '&ldquo;text&rdquo; field for it, so it cannot be lined up against the other '
+            + 'configuration)</span>';
+        } else {
+          html += escapeHtml(texts[key]);
+          const partners = driftPartners[key];
+          if (partners && partners.length) {
+            html += '<span class="assertion-drift">Graders worded this differently: '
+              + [...new Set(partners)].map(t => "“" + escapeHtml(t) + "”").join(", ")
+              + ". Probably the same check, shown separately because the wording is not "
+              + "identical &mdash; this page never merges two differently-worded checks, "
+              + "because it cannot tell that apart from two genuinely different checks. "
+              + "Have the graders copy each assertion character-for-character from "
+              + "eval_metadata.json.</span>";
+          }
+        }
+        html += "</td>";
+
+        for (const config of configGroups) {
+          html += "<td>";
+          const entries = cells[key][config];
+          if (!entries || entries.length === 0) {
+            html += UNKNOWN_HTML + " ";
+          } else {
+            for (const entry of entries) {
+              // Three verdicts, three marks. An abstention is drawn as neither
+              // ✓ nor ✗ because it is neither: the judge declined to rule.
+              const cls = entry.verdict === null ? "unknown"
+                : VERDICT_CELL_CLASS[entry.verdict];
+              const icon = entry.verdict === null ? UNKNOWN
+                : VERDICT_ICON[entry.verdict];
+              // The title attribute carries grader-written evidence, which is
+              // a quotation of the output being evaluated. escapeHtml covers
+              // " and ' so it cannot close the attribute and add a handler.
+              let tip = "Run " + (entry.run_number == null ? "?" : entry.run_number)
+                + ": " + (entry.evidence || "(no evidence recorded)");
+              if (entry.badge) {
+                // The typed reason is on the mark itself, not only in a
+                // paragraph under the table: this cell is what a reader
+                // compares across configurations, and an abstention without
+                // its reason is not comparable to anything. The repair rides
+                // along, because the reason is only useful for what it tells
+                // the reader to do next.
+                tip = "Abstained (" + entry.badge.short + ") — "
+                  + entry.badge.detail
+                  + (entry.badge.repair ? " " + entry.badge.repair : "")
+                  + " " + tip;
+              }
+              html += '<span class="' + cls + '" title="' + escapeHtml(tip) + '">' + icon;
+              if (entry.badge) {
+                html += '<span class="assertion-reason ' + entry.badge.cls + '">'
+                  + escapeHtml(entry.badge.short) + '</span>';
+              }
+              html += "</span> ";
+            }
+          }
+          html += "</td>";
+        }
+        html += "</tr>";
+      }
+      html += "</tbody></table>";
+      // The banner states what the code does. The previous one said "matched by
+      // position" over code that did something else.
+      html += '<p class="benchmark-caption">Checks are lined up across configurations by '
+        + '<strong>exact text</strong>, never by their position in the grader\'s output &mdash; '
+        + 'two graders can return the same checks in different orders, and matching by position '
+        + 'would then show them agreeing when they disagree. '
+        + escapeHtml(UNKNOWN) + ' means this configuration reported no result for that exact '
+        + 'check.</p>';
+      if (abstainCount > 0) {
+        // The legend lists the reasons THIS eval produced, in the order the
+        // reason table declares them, with the unrecognized and untyped ones
+        // after. Naming all of them on every table would be noise; naming only
+        // some of them from a hand-written sentence is how `underspecified`
+        // went missing in the first place.
+        const legend = [];
+        for (const key of Object.keys(ABSTAIN_REASONS)) {
+          if (seenBadges.has(key)) legend.push(seenBadges.get(key));
+        }
+        for (const [short, badge] of seenBadges) {
+          if (!knownReason(short)) legend.push(badge);
+        }
+        html += '<div class="benchmark-caption">'
+          + '<span class="benchmark-abstain">' + VERDICT_ICON.abstain + '</span> '
+          + escapeHtml(abstainCount + " check(s) were abstained on: the judge looked and declined "
+            + "to rule. They are neither passes nor failures and are in neither side of the pass "
+            + "rate. A row of " + VERDICT_ICON.abstain + " is not a row the skill failed — it is a "
+            + "check nobody settled, and the tag on it says whose move it is:")
+          + '<ul class="abstain-legend">'
+          + legend.map(badge =>
+              '<li><span class="assertion-reason ' + badge.cls + '">'
+              + escapeHtml(badge.short) + '</span> ' + escapeHtml(
+                badge.detail + (badge.repair ? " " + badge.repair : "")) + '</li>')
+            .join("")
+          + '</ul></div>';
+      }
+      if (legacyCount > 0) {
+        html += '<div class="benchmark-warning">' + escapeHtml(
+          legacyCount + " check(s) here carry a true/false `passed` and no `verdict`. "
+          + LEGACY_VERDICT_WARNING) + '</div>';
+      }
+      if (untextedCount > 0) {
+        html += '<p class="benchmark-caption">' + escapeHtml(untextedCount === 1
+          ? "1 check had no text and is shown on its own row: with nothing to match on, it "
+            + "cannot be compared across configurations."
+          : untextedCount + " checks had no text and are shown on their own rows: with nothing "
+            + "to match on, they cannot be compared across configurations.")
+          + "</p>";
+      }
+      return html;
+    }
+
+    // ---- Benchmark helpers -----------------------------------------------
+    function nullable(v) {
+      return (v === null || v === undefined) ? null : v;
+    }
+
+    function adaptStat(stat) {
+      // run_summary metric blocks are {mean, stddev, min, max, n, missing} and
+      // any of them can be null outright. stddev is null at n=1 and must stay
+      // null — coercing it to 0 would claim a spread that was never measured.
+      if (!stat || typeof stat !== "object" || !isNum(stat.mean)) return null;
+      return {
+        mean: stat.mean,
+        stddev: isNum(stat.stddev) ? stat.stddev : null,
+        n: isNum(stat.n) ? stat.n : null,
+        missing: isNum(stat.missing) ? stat.missing : 0,
+      };
+    }
+
+    function summaryHas(summary, key) {
+      return Object.keys(summary).some(k => k !== "delta" && summary[k] && summary[k][key]);
+    }
+
+    function hasKey(runs, key) {
+      return runs.some(r => r.result && r.result[key] !== undefined);
+    }
+
+    // The denominator is passed + failed, NOT total. Abstentions
+    // are checks the judge declined to rule on; counting them in the
+    // denominator states that the run failed them, which is precisely the
+    // conflation this contract removed. `total` is still tracked, because the
+    // gap between it and `graded` is what tells a reader how much of the eval
+    // set this rate actually covers.
+    function microAverage(results) {
+      let passed = 0, graded = 0, abstained = 0, total = 0;
+      let counted = 0, skipped = 0;
+      for (const r of results) {
+        if (isNum(r.passed) && isNum(r.failed)) {
+          passed += r.passed;
+          graded += r.passed + r.failed;
+          if (isNum(r.abstained)) abstained += r.abstained;
+          if (isNum(r.total)) total += r.total;
+          counted += 1;
+        } else {
+          skipped += 1;
+        }
+      }
+      // No graded check anywhere is not 0% — there is no rate. A run whose
+      // expectations all abstained lands here, and rendering it as 0% would
+      // put a failing score on a run nothing was ruled against.
+      if (graded === 0) {
+        if (counted === 0) return null;
+        return { rate: null, passed, graded, abstained, total, counted, skipped };
+      }
+      return { rate: passed / graded, passed, graded, abstained, total,
+               counted, skipped };
+    }
+
+    function fmtMicro(micro) {
+      if (!micro) return UNKNOWN_HTML;
+      const parts = [];
+      let out;
+      if (micro.rate === null) {
+        out = '<span class="benchmark-abstain">' + escapeHtml("no rate") + "</span>";
+        parts.push("0 of " + micro.total + " checks were ruled on");
+      } else {
+        out = escapeHtml((micro.rate * 100).toFixed(0) + "%");
+        parts.push(micro.passed + "/" + micro.graded + " graded checks");
+      }
+      // Always beside the rate, never omitted when non-zero: 100% over two
+      // graded checks and nine abstentions is a different result from 100%
+      // over eleven, and the percentage alone renders them identically.
+      if (micro.abstained > 0) {
+        parts.push(micro.abstained + " abstained of " + micro.total);
+      }
+      if (micro.skipped > 0) parts.push(micro.skipped + " run(s) not counted");
+      out += '<span class="metric-note">' + escapeHtml(parts.join(", ")) + "</span>";
+      return out;
+    }
+
+    function compareEvalIds(a, b) {
+      // eval_id may be an int, a string, or missing entirely. Comparing mixed
+      // types with a - b yields NaN and an arbitrary order; compare as strings
+      // when they are not both numbers.
+      if (isNum(a) && isNum(b)) return a - b;
+      if (a === null || a === undefined) return 1;
+      if (b === null || b === undefined) return -1;
+      return String(a).localeCompare(String(b));
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

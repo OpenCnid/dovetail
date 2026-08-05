@@ -1,0 +1,8 @@
+{
+  "eval_id": 1,
+  "eval_name": "timing-only",
+  "prompt": "Task 1.",
+  "assertions": [
+    "Check A"
+  ]
+}
