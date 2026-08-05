@@ -1,0 +1,20 @@
+{
+  "description": "Injects the using-dovetail entry skill at session start, so the companion rule and the two invisible skills are known before any work begins.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": false,
+            "timeout": 10,
+            "statusMessage": "Loading dovetail",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start\""
+          }
+        ]
+      }
+    ]
+  }
+}

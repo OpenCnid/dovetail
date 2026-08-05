@@ -1,0 +1,8 @@
+{
+  "_comment": "Every place this pack's version is written. scripts/bump-version.sh moves them together. A version that agrees with itself is not cosmetic here: the marketplace entry carries strict: true, and `claude plugin tag` refuses to tag when plugin.json and the enclosing marketplace entry disagree.",
+  "files": [
+    { "path": ".claude-plugin/plugin.json", "field": "version" },
+    { "path": ".claude-plugin/marketplace.json", "field": "plugins.0.version" },
+    { "path": ".claude-plugin/marketplace.json", "field": "metadata.version" }
+  ]
+}
