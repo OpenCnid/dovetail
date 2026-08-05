@@ -62,8 +62,10 @@ normally. `upsum` carries the same flag and `/upsum` loads it the same way; that
 one has not been put through the headless check, so treat its absence from the
 list as expected rather than as observed.
 
-A correctly installed pack therefore looks like six skills Claude can reach and
-two it will deny having. That is the intended state, not a broken install.
+A correctly installed pack therefore looks like **seven skills Claude can reach
+and two it will deny having** — the six above plus `using-dovetail`, the entry
+point the `SessionStart` hook injects. That is the intended state, not a broken
+install.
 
 ## Install
 
