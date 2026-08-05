@@ -82,16 +82,26 @@ Installing the pack loads all nine skills at once, and a `SessionStart` hook
 injects `dovetail:using-dovetail` — the companion rule, and the notice that two
 of the skills are invisible to the model — into every session.
 
-> [!IMPORTANT]
-> **Partly verified.** On CLI 2.1.214 (Windows 10), `marketplace add` +
-> `install` against a **local checkout** registers all nine skills and the
-> `SessionStart` hook, and the hook fires. What that run does *not* test is the
-> thing this note was originally about: the pack holds its skills as **git
-> submodules**, and whether a fetch **from GitHub** recurses into them is still
-> unconfirmed — the local source already had them checked out. If the skills come
-> back empty, that is why; use the direct install below, which has no such
-> dependency, and please open an issue so this half can be replaced with a fact
-> too.
+> [!NOTE]
+> **Verified from GitHub**, which this note used to say was the open question.
+> On CLI 2.1.214 (Windows 10), `marketplace add` of the HTTPS URL followed by
+> `install` reports `Skills (9)` and `Hooks (1) SessionStart`, and all nine
+> bodies load in a session. **A plugin fetch does recurse into the submodules** —
+> that was the doubt, and it is settled.
+>
+> Two things that will bite on Windows, both observed:
+>
+> - **Use the HTTPS URL, not the `OpenCnid/dovetail` shorthand.** The shorthand
+>   resolves to `git@github.com:` and fails with *Permission denied (publickey)*
+>   on any machine without SSH keys, even though the repository is public.
+> - **Install under a short path.** `better-skill-creator` carries deep test
+>   fixtures, and its longest path leaves about 62 characters of headroom below
+>   the 260-character `MAX_PATH` limit under a default `~/.claude`. A long
+>   username or a deep `CLAUDE_CONFIG_DIR` overruns it, and the failure reads as
+>   `fetch-pack: invalid index-pack output` — a clone error that says nothing
+>   about path length. `git config --global core.longpaths true` removes the
+>   limit. This predates the `skills/<name>/` layout, which spent 28 of those
+>   characters.
 
 ### Directly
 
@@ -130,8 +140,16 @@ source wins and the pin gets moved.
 
 ## What is honestly weak here
 
-- **The plugin install route is unverified.** See the note above. The direct
-  route is the one we have actually run.
+- **Both install routes are now run, on one platform only.** Everything here was
+  verified on CLI 2.1.214, Windows 10. Nothing has been run on macOS or Linux,
+  and the two Windows traps in the install note are the kind of thing that is
+  platform-shaped in both directions — there may be traps elsewhere that this
+  machine cannot see.
+- **A skill that loads is not a skill that works.** `scripts/test-skills.sh`
+  proves each body reaches the session; it cannot prove the model then acts on
+  it. That distinction is not pedantic — the injected `SessionStart` directive
+  is verified to arrive and unverified to change behavior, which needs an
+  authenticated run the harness deliberately does not require.
 - **`prompt-engineering` and `hypershot-protocol` are not our method.** They are
   the Lexideck curriculum compressed into deployable form. The work is
   [Matthew Murphy's](https://github.com/gusthemole); credit the source, not the

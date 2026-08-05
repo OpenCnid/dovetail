@@ -11,7 +11,7 @@
             "async": false,
             "timeout": 10,
             "statusMessage": "Loading dovetail",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start"
           }
         ]
       }
