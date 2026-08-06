@@ -102,7 +102,10 @@ installing it so it can be invoked does.
 3. Add a row to the README table, and say what it is *for* rather than what it is.
 4. Run `bash scripts/test-skills.sh`. The inventory check fails if `skills/` and
    the lists disagree, and the live layer fails if the body never reaches a
-   session.
+   session. It exits 2 without running the live layer when it cannot confirm
+   `CLAUDE_CONFIG_DIR` reached the CLI — an exit 2 is not a pass, and the usual
+   cause is a POSIX shell invoking a Windows `claude.exe`, which is what
+   running from WSL does.
 
 Nothing needs to be published elsewhere first, and nothing needs a pin.
 
