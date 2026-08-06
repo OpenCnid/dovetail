@@ -26,7 +26,9 @@
 #              quotes them back verbatim, and leaves behind no file that a
 #              substitution would have created.
 #   modes      HEAD mode grades HEAD and explicit-tag mode grades the tag, in a
-#              throwaway repository built so that those are different commits.
+#              throwaway repository built so that those are different commits --
+#              and each mode holds its subject to the standard its own question
+#              needs: `main`'s tip for HEAD mode, anywhere on `main` for a tag.
 #              The third layer is newest and answers a different question from
 #              the other two: not "is this input safe?" but "is this the commit
 #              the answer is about?" See its own block further down.
@@ -416,6 +418,64 @@ else
   fail=1
 fi
 
+# ------------------------------------------------------ ancestry is not enough
+# Grading HEAD is only half of "is `main` releasable right now?". The other half
+# is what counts as an acceptable HEAD, and check 4 used to answer it with
+# `git merge-base --is-ancestor` in both modes -- which every commit `main` has
+# ever carried satisfies. So the mode assertions above could pass while the gate
+# still returned green about a commit `main` had moved past.
+#
+# `workflow_dispatch` takes a ref and the operator chooses it, so a run launched
+# from a stale branch or an old tag lands precisely there. Measured on this
+# repository with HEAD at `313b9e4` and `origin/main` at `5b36154`, `--strict
+# --head` reported every check `ok` and exited 0, and the commit it was missing
+# was `5b36154` -- the fix to this gate's own injection hole.
+#
+# The fixture already holds the two commits this needs; park HEAD on the tagged
+# one and `main` stays a commit ahead, which is that dispatch exactly. The tag
+# still points at HEAD here, so the already-released check passes and check 4 is
+# the only thing that can fail -- which is what makes the exit code below mean
+# one specific thing.
+echo
+echo "behaviour — HEAD mode on a commit main has moved past"
+
+git -C "$FIXTURE" -c advice.detachedHead=false checkout -q "$RELEASED"
+
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+if ! printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $RELEASED_SHORT"; then
+  note FAIL "--head — did not grade HEAD ($RELEASED_SHORT)"
+  fail=1
+elif printf '%s\n' "$out" | grep -qE '^ +ok +commit is on refs/remotes/origin/main$'; then
+  # The exact line the shared ancestor test printed. Reverting to it fails here
+  # and on the exit code below, rather than only on a message nobody reads.
+  note FAIL "--head — behind $DESCENDANT_SHORT and still called on main"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "--head — exit $rc, expected 1 (HEAD is not main's tip)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "commit(s) behind refs/remotes/origin/main"; then
+  note FAIL "--head — failed, but not because HEAD is behind main"
+  fail=1
+else
+  note ok "--head — $RELEASED_SHORT is an ancestor of main and is refused anyway"
+fi
+
+# The half that must NOT change, and the reason this is not simply a stricter
+# check in both modes: same repository, same commit, explicit-tag mode, and
+# being an ancestor is the correct answer there. A released tag is always behind
+# the tip, so requiring the tip would refuse every real release.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$FIXTURE_TAG" 2>&1)" && rc=0 || rc=$?
+if printf '%s\n' "$out" | grep -qE '^ +ok +commit is on refs/remotes/origin/main$'; then
+  note ok "$FIXTURE_TAG — explicit-tag mode still accepts an ancestor ($RELEASED_SHORT)"
+else
+  note FAIL "$FIXTURE_TAG — explicit-tag mode no longer accepts an ancestor (exit $rc)"
+  fail=1
+fi
+
+# And back onto the tip: the controls below run HEAD mode again and need a HEAD
+# that passes check 4, or they would report the tag state they are testing.
+git -C "$FIXTURE" checkout -q main
+
 # A control for the two HEAD-mode assertions above. Drop this version's tag,
 # leave the pack's other tags in place, and the same command on the same commit
 # passes: so the failure was that tag, and not the fixture being unreleasable
@@ -435,6 +495,35 @@ else
   note FAIL "--head — untagged, $DESCENDANT_SHORT still does not pass (exit $rc)"
   fail=1
 fi
+
+# The third way in, and the one the mode flag alone does not describe: a tag
+# named on the command line that has no local ref. The mode is explicit-tag --
+# check 2 grades `$FIXTURE_TAG`'s version against the manifests, a real question
+# there -- but there is no tag to resolve, so the commit graded is HEAD, and
+# check 4 has to hold it to HEAD's standard rather than to a resolved tag's. It
+# is somebody checking a release they are about to cut, from whatever they have
+# checked out, which is how 0.4.0 was cut in the first place.
+#
+# The control above already deleted `$FIXTURE_TAG` and left `$OTHER_TAG` behind,
+# so naming it here is exactly that state and costs no extra fixture.
+echo
+echo "behaviour — a named tag with no local ref still grades HEAD"
+
+git -C "$FIXTURE" -c advice.detachedHead=false checkout -q "$RELEASED"
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$FIXTURE_TAG" 2>&1)" && rc=0 || rc=$?
+if ! printf '%s\n' "$out" | grep -qF "no local tag $FIXTURE_TAG; checking HEAD"; then
+  note FAIL "$FIXTURE_TAG — did not take the no-such-tag fallback (exit $rc)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $RELEASED_SHORT"; then
+  note FAIL "$FIXTURE_TAG — fell back, but did not grade HEAD ($RELEASED_SHORT)"
+  fail=1
+elif [ "$rc" -ne 1 ] || ! printf '%s\n' "$out" | grep -qF "commit(s) behind refs/remotes/origin/main"; then
+  note FAIL "$FIXTURE_TAG — graded HEAD but accepted an ancestor of main (exit $rc)"
+  fail=1
+else
+  note ok "$FIXTURE_TAG — no local ref: grades HEAD, and to HEAD's standard"
+fi
+git -C "$FIXTURE" checkout -q main
 
 # And the state that is not that at all: no tags here whatsoever. `git clone
 # --depth 1` and `--no-tags` both produce it, as does actions/checkout's

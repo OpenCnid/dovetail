@@ -12,7 +12,13 @@
 # triggered by the tag can ask.
 #
 # `workflow_dispatch` runs the same script in its HEAD mode, which answers "is
-# main releasable right now?" before anybody tags anything.
+# main releasable right now?" before anybody tags anything. A dispatch takes a
+# ref and the operator picks it, so "right now" holds only of what got checked
+# out: HEAD mode requires HEAD to *be* `origin/main`'s tip rather than merely
+# sit somewhere in its history, and a dispatch from a stale branch or an old tag
+# is refused there instead of returning main's verdict about a commit main has
+# moved past. Ancestry -- which every commit main ever carried satisfies -- used
+# to be the whole test, and this workflow was the way to reach it.
 #
 # The two steps below exist because that used to be one step distinguishing the
 # cases by whether `RELEASE_TAG` was empty, and emptiness is a weaker signal than
@@ -48,9 +54,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Belt and braces: the ancestry check needs `origin/main` to exist, and
-      # which remote-tracking refs a tag build ends up with is not the thing to
-      # bet a release gate on. Idempotent, and free once the objects are local.
+      # Belt and braces: check 4 needs `origin/main` to exist, and which
+      # remote-tracking refs a tag build ends up with is not the thing to bet a
+      # release gate on. Idempotent, and free once the objects are local.
+      #
+      # Load-bearing twice over now that HEAD mode compares against the tip: a
+      # stale `origin/main` would make a stale HEAD look current, which is the
+      # failure this fetch is standing in front of.
       - name: Fetch main
         run: git fetch --no-tags origin +main:refs/remotes/origin/main
 
@@ -78,6 +88,12 @@ jobs:
       # commit this run checked out: the version in the manifests may well be
       # tagged already, and HEAD mode reports that as a failure to bump rather
       # than quietly grading the commit that tag points at.
+      #
+      # It can also fail because `main` moved between this run being dispatched
+      # and the fetch above landing. That is a true answer to the question asked
+      # -- the tip is no longer what this run checked out -- and it clears on a
+      # re-run, which is the right cost for a check that otherwise cannot tell a
+      # race from a dispatch off a two-release-old ref.
       - name: Release check (HEAD)
         if: github.event_name != 'push'
         env:

@@ -43,7 +43,10 @@
 #                                                  installs 0.4.0 is worse than
 #                                                  no tag)
 #   3. RELEASE-NOTES.md has an entry for it
-#   4. the commit is on `main`                    (nothing ships off a branch)
+#   4. the commit is on `main`                    (nothing ships off a branch --
+#                                                  and where that commit is HEAD
+#                                                  it has to *be* `main`, not
+#                                                  merely sit in its history)
 #   5. `checks` concluded success on that SHA     (needs `gh`; see --strict)
 #
 # And one only HEAD mode can ask, between 2 and 3: that the version is not
@@ -56,6 +59,25 @@
 # Check 2 runs the other way round: in HEAD mode it is the empty one, because
 # the version it compares against came out of the manifests it is comparing. It
 # prints what HEAD would ship instead of claiming a verdict.
+#
+# Check 4 splits by mode as well, and that seam leaked next. Ancestry is the
+# right test for a tag: a released tag is always behind the tip, and being on
+# `main` at all is the whole of what it has to prove. It is the wrong test for
+# HEAD mode, whose question is "is `main` releasable right now?" -- every commit
+# `main` has ever carried is an ancestor of `main`, so ancestry answers about a
+# state `main` has already moved past and hands that back as `main`'s verdict.
+# `workflow_dispatch` takes a ref and the operator chooses it, so a run launched
+# from a stale branch or an old tag lands exactly there: with HEAD at `313b9e4`
+# and `origin/main` at `5b36154`, `--strict --head` reported every check `ok`
+# and exited 0 -- and the commit it did not have was `5b36154` itself, the fix
+# to this script's own injection hole. It is the 0.4.0 shape a third time: green
+# checks, fixes landed afterwards, and the gate blessing the state before them.
+#
+# So a run grading HEAD requires the tip, and a run grading a resolved tag keeps
+# ancestry. That line is drawn on the commit rather than on the mode, because
+# they part company in the `no local tag` fallback below: the mode there is
+# explicit-tag, the subject is HEAD, and it is somebody about to cut a tag from
+# whatever they have checked out -- which is the 0.4.0 hand exactly.
 #
 # Before any of them, the tag has to be a tag this pack could have issued:
 # `<plugin>--v<major>.<minor>.<patch>`, optionally `-<prerelease>`. Anything
@@ -155,12 +177,25 @@ esac
 # `refs/tags/` at all. That unconditional `git rev-parse HEAD` is the fix: the
 # branch below used to run in both modes, so a tag that already existed silently
 # took HEAD's place while the banner above still said "checking HEAD".
+#
+# `SUBJECT_IS_HEAD` is tracked apart from `$HEAD_MODE` because the two come
+# apart in the last branch, and check 4 needs the one they disagree on. The mode
+# there is still explicit-tag -- check 2 grades the named tag's version against
+# the manifests, which is a real question with a real answer -- but there is no
+# tag to resolve, so the commit graded is HEAD. Check 4 keys off the commit.
+#
+# It starts strict and one branch opts out, rather than each branch declaring
+# itself: a fourth branch added later and left undeclared gets the tip test,
+# which is the answer that refuses a release rather than the one that waves it
+# through.
+SUBJECT_IS_HEAD=1
 if [ "$HEAD_MODE" -eq 1 ]; then
   SHA="$(git rev-parse HEAD)"
 # An annotated tag's own object is not the commit it points at, and `git
 # rev-list -n 1` resolves through to the commit either way.
 elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   SHA="$(git rev-list -n 1 "$TAG")"
+  SUBJECT_IS_HEAD=0
 else
   # A named tag with no local ref is usually somebody checking a release they
   # are about to cut, so this falls back to HEAD rather than refusing. "No such
@@ -253,9 +288,28 @@ for ref in refs/remotes/origin/main refs/heads/main; do
   fi
 done
 
+# Two strengths of one question, because the two subjects need different ones. A
+# resolved tag has to prove it is somewhere on `main`. A run grading HEAD has to
+# prove HEAD *is* `main`, and `--is-ancestor` cannot carry that -- see the block
+# at the top of the file. The behind case gets its own arm rather than folding
+# into "not on main": those are opposite repairs -- fetch and re-run, against
+# land it on `main` first -- and a gate that names the wrong one sends the
+# reader somewhere there is nothing to find.
 if [ -z "$MAIN" ]; then
   note FAIL "no main ref to check against — fetch it first (git fetch origin main)"
   fail=1
+elif [ "$SUBJECT_IS_HEAD" -eq 1 ]; then
+  MAIN_SHA="$(git rev-parse "$MAIN")"
+  if [ "$SHA" = "$MAIN_SHA" ]; then
+    note ok "HEAD is $MAIN"
+  elif git merge-base --is-ancestor "$SHA" "$MAIN"; then
+    behind="$(git rev-list --count "$SHA..$MAIN")"
+    note FAIL "HEAD is $behind commit(s) behind $MAIN — $(git rev-parse --short "$MAIN_SHA") is what would ship"
+    fail=1
+  else
+    note FAIL "HEAD is not on $MAIN — nothing ships off a branch"
+    fail=1
+  fi
 elif git merge-base --is-ancestor "$SHA" "$MAIN"; then
   note ok "commit is on $MAIN"
 else
