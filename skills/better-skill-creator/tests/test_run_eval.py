@@ -25,10 +25,13 @@ import json
 import locale
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1744,6 +1747,374 @@ class TestScaffoldDisclosures(StubHarness):
         with mock.patch("sys.stderr", err):
             check_scaffold(str(self.scaffold))
         self.assertEqual(err.getvalue(), "")
+
+
+class _SignalState(unittest.TestCase):
+    """Base class that puts the process's signal disposition back afterwards.
+
+    `run_eval` installs handlers as a side effect, so a test that exercises them
+    must not leave them behind for the rest of the suite.
+    """
+
+    _SIGNALS = ("SIGINT", "SIGTERM", "SIGBREAK", "SIGHUP")
+
+    def preserve_signal_state(self):
+        saved = {}
+        for name in self._SIGNALS:
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue
+            try:
+                saved[sig] = signal.getsignal(sig)
+            except (ValueError, OSError):
+                continue
+        installed = run_eval_mod._CLEANUP_INSTALLED
+
+        def restore():
+            for sig, handler in saved.items():
+                # getsignal answers None for a handler not set from Python;
+                # there is nothing to put back in that case.
+                if handler is None:
+                    continue
+                try:
+                    signal.signal(sig, handler)
+                except (ValueError, OSError, TypeError):
+                    pass
+            run_eval_mod._CLEANUP_INSTALLED = installed
+            run_eval_mod._INTERRUPTED.clear()
+
+        self.addCleanup(restore)
+
+    def install_fresh(self):
+        """Install the handlers as a first call in this process would."""
+        self.preserve_signal_state()
+        run_eval_mod._CLEANUP_INSTALLED = False
+        run_eval_mod._INTERRUPTED.clear()
+        run_eval_mod.install_cleanup_handlers()
+
+
+class TestCtrlCStopsSpending(_SignalState):
+    """Ctrl-C must reach run_eval's cancellation path instead of being eaten.
+
+    install_cleanup_handlers used to install its own SIGINT handler, replacing
+    signal.default_int_handler -- the handler that raises KeyboardInterrupt. So
+    Ctrl-C never unwound the `for future in as_completed(...)` loop and never
+    reached `except BaseException: executor.shutdown(cancel_futures=True)`.
+    What ran instead was cleanup_owned() on the main thread, taking tens of
+    seconds (kill + wait(timeout=5) per child, then ~3s of rmtree backoff per
+    root) while the pool's workers were still dequeuing -- so each one that
+    finished started a fresh *billed* `claude`. Those children were registered
+    after the cleanup snapshot and were still alive when os.kill landed under
+    SIG_DFL, where atexit does not fire, so they were orphaned as well.
+    """
+
+    def test_sigint_is_left_to_the_handler_that_raises_keyboardinterrupt(self):
+        self.install_fresh()
+        self.assertIs(
+            signal.getsignal(signal.SIGINT),
+            signal.default_int_handler,
+            "SIGINT must stay with Python's own handler; anything else makes "
+            "run_eval's `except BaseException` unreachable from Ctrl-C",
+        )
+
+    def test_an_ignored_sigint_is_left_ignored(self):
+        """A parent that ignored SIGINT said so. POSIX convention is to obey."""
+        self.preserve_signal_state()
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except (ValueError, OSError):  # pragma: no cover - not the main thread
+            self.skipTest("cannot set SIGINT disposition here")
+        run_eval_mod._CLEANUP_INSTALLED = False
+        run_eval_mod.install_cleanup_handlers()
+        self.assertIs(signal.getsignal(signal.SIGINT), signal.SIG_IGN)
+
+    def test_a_caught_signal_unwinds_rather_than_cleaning_up_in_place(self):
+        """SIGTERM/SIGBREAK/SIGHUP take the same path Ctrl-C does.
+
+        cleanup_owned() must not be called from a handler at all: handlers run
+        on the main thread, _OWNED_LOCK is not reentrant, and a handler that
+        took it while the main thread already held it would hang the process
+        rather than stop it. os.kill and cleanup_owned are patched here so this
+        stays a test even against the old handler, which would otherwise take
+        the test process down with SIG_DFL.
+        """
+        self.install_fresh()
+        handler = signal.getsignal(signal.SIGTERM)
+        self.assertTrue(callable(handler), "SIGTERM is not handled at all")
+
+        with mock.patch.object(run_eval_mod, "cleanup_owned") as cleaned, \
+                mock.patch.object(os, "kill") as killed:
+            with self.assertRaises(KeyboardInterrupt):
+                handler(signal.SIGTERM, None)
+
+        cleaned.assert_not_called()
+        killed.assert_not_called()
+        self.assertTrue(
+            run_eval_mod._INTERRUPTED.is_set(),
+            "the handler must stop the workers spending even before the raise "
+            "reaches the main thread",
+        )
+
+    def test_a_sigint_during_a_run_cancels_the_queued_probes(self):
+        """The end-to-end claim, driven by a real SIGINT.
+
+        `on_record` runs on the main thread inside the scheduling loop, which is
+        where a Ctrl-C would land, and signal.raise_signal runs the installed
+        handler synchronously. So this is the real delivery path, without the
+        thread-timing dependence of signalling from a worker.
+        """
+        self.install_fresh()
+        self.assertIs(
+            signal.getsignal(signal.SIGINT),
+            signal.default_int_handler,
+            "guard: raising SIGINT below is only safe once it is Python's own "
+            "handler. The old one ran os.kill under SIG_DFL and would take this "
+            "test process with it.",
+        )
+
+        workers = 2
+        eval_set = [{"query": f"q{i}", "should_trigger": True} for i in range(24)]
+        launched: list[str] = []
+        launched_after_flag: list[str] = []
+        lock = threading.Lock()
+
+        def fake(query, skill_name, skill_description, timeout, *args, **kwargs):
+            with lock:
+                launched.append(query)
+                if run_eval_mod._INTERRUPTED.is_set():
+                    launched_after_flag.append(query)
+            # Long enough that the queue cannot drain before the interrupt.
+            time.sleep(0.05)
+            return {
+                "query": query,
+                "probe_id": f"{skill_name}-skill-deadbeef",
+                "status": "no_trigger",
+                "triggered": False,
+                "stop_reason": "result",
+                "error": None,
+                "tools": [],
+                "elapsed_seconds": 0.05,
+                "cost_usd": 0.01,
+                "probe_root": None,
+            }
+
+        seen: list[dict] = []
+        at_interrupt: list[int] = []
+
+        def on_record(_record):
+            seen.append(_record)
+            if len(seen) == 2:
+                with lock:
+                    at_interrupt.append(len(launched))
+                signal.raise_signal(signal.SIGINT)
+
+        with mock.patch.object(run_eval_mod, "run_single_query", fake):
+            with self.assertRaises(KeyboardInterrupt):
+                run_eval(
+                    eval_set=eval_set,
+                    skill_name="widget-forge",
+                    description=DESCRIPTION,
+                    num_workers=workers,
+                    timeout=5,
+                    runs_per_query=1,
+                    on_record=on_record,
+                )
+
+        self.assertEqual(len(at_interrupt), 1, "the interrupt never fired")
+        self.assertLess(
+            len(launched), len(eval_set),
+            "every queued probe still launched: Ctrl-C did not reach "
+            "executor.shutdown(cancel_futures=True)",
+        )
+        self.assertLessEqual(
+            len(launched), at_interrupt[0] + workers,
+            "probes kept launching after the interrupt; only the ones already "
+            "dequeued may finish",
+        )
+        self.assertEqual(
+            launched_after_flag, [],
+            "a probe started after the run was marked interrupted",
+        )
+
+    def test_the_interrupt_flag_is_cleared_for_the_next_run(self):
+        """run_loop calls run_eval per iteration. A stale flag would turn the
+        next call into a 100%-errored run, which reads as a dead harness."""
+        self.install_fresh()
+        run_eval_mod._INTERRUPTED.set()
+
+        eval_set = [{"query": "positive", "should_trigger": True}]
+        with mock.patch.object(
+            run_eval_mod, "run_single_query", _fake_probe({"positive": ["trigger"]})
+        ):
+            out = run_eval(
+                eval_set=eval_set,
+                skill_name="widget-forge",
+                description=DESCRIPTION,
+                num_workers=1,
+                timeout=5,
+                runs_per_query=2,
+            )
+        self.assertFalse(run_eval_mod._INTERRUPTED.is_set())
+        self.assertEqual(out["results"][0]["runs"], 2)
+
+
+class TestInterruptedProbeNeverLaunches(StubHarness):
+    """The spend is gated where it happens, not where the jobs are handed out.
+
+    The main thread cannot be relied on to notice an interrupt promptly -- on
+    Windows only SIGINT breaks it out of a blocking wait -- so a queued worker
+    checks for itself before it starts a billed session.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(run_eval_mod._INTERRUPTED.clear)
+
+    def test_no_claude_is_launched_once_the_run_is_interrupted(self):
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        run_eval_mod._INTERRUPTED.set()
+        record = self.probe()
+        self.assertFalse(
+            self.report_path.exists(),
+            "a billed session was started after the run was interrupted",
+        )
+        self.assertEqual(record["status"], "error", record)
+        self.assertEqual(record["stop_reason"], "interrupted")
+        self.assertIsNone(
+            record["triggered"], "an interrupted probe is not a measurement"
+        )
+
+    def test_an_interrupted_probe_creates_no_probe_root(self):
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        before = set(run_eval_mod._OWNED_ROOTS)
+        run_eval_mod._INTERRUPTED.set()
+        record = self.probe()
+        self.assertIsNone(record["probe_root"])
+        self.assertEqual(set(run_eval_mod._OWNED_ROOTS), before)
+
+    def test_an_uninterrupted_probe_is_unaffected(self):
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        self.assertFalse(run_eval_mod._INTERRUPTED.is_set())
+        record = self.probe()
+        self.assertEqual(record["status"], "trigger", record)
+
+
+class TestSurvivingProbeRootStaysRegistered(unittest.TestCase):
+    """A probe root that resisted removal must stay owned, not be forgotten.
+
+    _release_root discarded str(path) from _OWNED_ROOTS unconditionally, before
+    checking whether _rmtree_retry had actually succeeded. _rmtree_retry exists
+    because Windows refuses to unlink a directory that is still a just-killed
+    `claude`'s cwd -- so the single root the exit sweep needed to hear about was
+    the one it was told to forget, at the moment when a later retry, with the
+    holding process gone, would have worked. For a --scaffold run that stranded
+    a copy of the user's project under %TEMP% behind one stderr line.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="run-eval-teardown-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.scaffold = self.tmp / "scaffold"
+        (self.scaffold / "src").mkdir(parents=True)
+        (self.scaffold / "src" / "proprietary.py").write_text(
+            "# the user's project\n", encoding="utf-8"
+        )
+        self.owned_before = set(run_eval_mod._OWNED_ROOTS)
+        self.addCleanup(self._restore_ownership)
+
+    def _restore_ownership(self):
+        for root in set(run_eval_mod._OWNED_ROOTS) - self.owned_before:
+            shutil.rmtree(root, ignore_errors=True)
+            run_eval_mod._OWNED_ROOTS.discard(root)
+
+    def make_root(self) -> Path:
+        root = run_eval_mod._make_probe_root(str(self.scaffold))
+        self.assertIn(str(root), run_eval_mod._OWNED_ROOTS)
+        self.assertTrue((root / "src" / "proprietary.py").exists())
+        return root
+
+    def test_a_root_that_could_not_be_removed_is_still_owned(self):
+        root = self.make_root()
+        err = io.StringIO()
+        with mock.patch.object(run_eval_mod, "_rmtree_retry", return_value=False):
+            with mock.patch("sys.stderr", err):
+                run_eval_mod._release_root(root)
+        self.assertIn(
+            str(root), run_eval_mod._OWNED_ROOTS,
+            "a root that survived removal was dropped from the ownership set, "
+            "so the exit sweep no longer knows it exists",
+        )
+        self.assertTrue(root.exists())
+        self.assertIn(str(root), err.getvalue())
+
+    def test_the_exit_sweep_removes_what_release_could_not(self):
+        """The whole point of staying registered. By exit the process holding
+        the directory is gone and the same retry succeeds."""
+        root = self.make_root()
+        with mock.patch.object(run_eval_mod, "_rmtree_retry", return_value=False):
+            with mock.patch("sys.stderr", io.StringIO()):
+                run_eval_mod._release_root(root)
+
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            run_eval_mod._final_cleanup()
+
+        self.assertFalse(
+            root.exists(),
+            "a --scaffold copy of the user's project was left under the temp dir",
+        )
+        self.assertNotIn(str(root), run_eval_mod._OWNED_ROOTS)
+        self.assertEqual(err.getvalue(), "", "nothing was left behind to report")
+
+    def test_the_sweep_keeps_what_it_could_not_remove(self):
+        """cleanup_owned had the same defect: it difference_update'd every root
+        it had walked, whether or not the rmtree worked."""
+        root = self.make_root()
+        with mock.patch.object(run_eval_mod, "_rmtree_retry", return_value=False):
+            surviving = run_eval_mod.cleanup_owned()
+        self.assertEqual(surviving, [str(root)])
+        self.assertIn(str(root), run_eval_mod._OWNED_ROOTS)
+        self.assertTrue(root.exists())
+
+    def test_the_exit_sweep_names_a_root_it_had_to_leave_behind(self):
+        root = self.make_root()
+        err = io.StringIO()
+        with mock.patch.object(run_eval_mod, "_rmtree_retry", return_value=False):
+            with mock.patch("sys.stderr", err):
+                run_eval_mod._final_cleanup()
+        self.assertIn(str(root), err.getvalue())
+        self.assertIn("scaffold", err.getvalue())
+
+    def test_a_removed_root_is_forgotten_as_before(self):
+        root = self.make_root()
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            run_eval_mod._release_root(root)
+        self.assertFalse(root.exists())
+        self.assertNotIn(str(root), run_eval_mod._OWNED_ROOTS)
+        self.assertEqual(err.getvalue(), "")
+
+    def test_a_root_removed_on_a_later_attempt_is_forgotten(self):
+        """_rmtree_retry's own backoff still resolves the ordinary case; the
+        registration must not survive a success that took more than one try."""
+        root = self.make_root()
+        real = run_eval_mod._rmtree_retry
+        attempts = []
+
+        def flaky(path, attempts_arg=5):
+            attempts.append(path)
+            if len(attempts) == 1:
+                return False
+            return real(path)
+
+        err = io.StringIO()
+        with mock.patch.object(run_eval_mod, "_rmtree_retry", flaky):
+            with mock.patch("sys.stderr", err):
+                run_eval_mod._release_root(root)
+                self.assertIn(str(root), run_eval_mod._OWNED_ROOTS)
+                run_eval_mod._release_root(root)
+        self.assertFalse(root.exists())
+        self.assertNotIn(str(root), run_eval_mod._OWNED_ROOTS)
 
 
 if __name__ == "__main__":

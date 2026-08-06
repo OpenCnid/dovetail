@@ -68,6 +68,21 @@ DESIGN NOTES (things that were wrong before, so nobody re-introduces them)
   an absent path is scored ``no_trigger``, not ``error``, so over-excluding
   moves the recall number silently. What is excluded is reported, never assumed
   read.
+* SIGINT is left to ``signal.default_int_handler``. Installing a handler for it
+  replaced the handler that raises ``KeyboardInterrupt``, so Ctrl-C never
+  unwound ``run_eval``'s scheduling loop and its ``except BaseException`` --
+  the branch that cancels the queued futures -- was dead code under the CLI.
+  What ran instead was cleanup on the main thread while the pool's workers were
+  still dequeuing, so every worker that finished during those seconds started a
+  fresh *billed* ``claude``. Ctrl-C kept spending, and those children were
+  registered after the cleanup snapshot and still running when ``os.kill``
+  landed under SIG_DFL, where atexit does not fire, so they were orphaned too.
+* A probe root is forgotten only once it is actually gone. ``_rmtree_retry``
+  exists because Windows refuses to unlink a directory that is still a
+  just-killed ``claude``'s cwd; discarding the registration before checking
+  whether removal worked meant the one root the exit sweep needed to hear about
+  was the one it had been told to forget. With ``--scaffold`` that root holds a
+  copy of the user's project.
 * That asymmetry is why the checks below it report rather than withhold. A hard
   link and a credential inside an innocently named file both reach the probe
   root, and both are named to the user instead of dropped: withholding either
@@ -133,6 +148,18 @@ _LIVE_PROCS: set[subprocess.Popen] = set()
 _OWNED_LOCK = threading.Lock()
 _CLEANUP_INSTALLED = False
 
+# Set the moment a run is interrupted, and read at the two points in
+# `run_single_query` where a probe would otherwise start spending.
+#
+# This, not the scheduling loop, is what stops the tail. The main thread cannot
+# be relied on to notice an interrupt promptly -- on Windows only SIGINT breaks
+# it out of a blocking wait, because CPython's C signal handler sets the
+# interrupt event for that signal alone -- so the decision is enforced where the
+# money is spent rather than where the jobs are handed out. A worker that
+# dequeues a job after this is set returns an `error` record without launching
+# anything, which is never scored.
+_INTERRUPTED = threading.Event()
+
 
 def _rmtree_retry(path: Path, attempts: int = 5) -> bool:
     """Remove a tree, retrying briefly.
@@ -160,11 +187,27 @@ def _register_root(path: Path) -> None:
 
 
 def _release_root(path: Path) -> None:
-    ok = _rmtree_retry(path)
-    with _OWNED_LOCK:
-        _OWNED_ROOTS.discard(str(path))
-    if not ok:
-        print(f"Warning: could not remove probe root {path}", file=sys.stderr)
+    """Remove one probe root, and forget we own it only if that worked.
+
+    Discarding unconditionally was a leak with a copy of the user's project in
+    it. ``_rmtree_retry`` exists precisely because a just-killed ``claude`` can
+    hold its cwd on Windows for a moment, so a root that survives all five
+    attempts is the one case the exit sweep must still know about -- and it is
+    the case the old order dropped from ``_OWNED_ROOTS``. By the time the sweep
+    ran the holding process was gone and the retry would have succeeded, but
+    nothing was left to tell it the directory existed. Under ``--scaffold`` what
+    stayed behind under %TEMP% was a copy of the scaffold tree, announced by one
+    stderr line.
+    """
+    if _rmtree_retry(path):
+        with _OWNED_LOCK:
+            _OWNED_ROOTS.discard(str(path))
+        return
+    print(
+        f"Warning: could not remove probe root {path} yet; it stays registered "
+        f"and is retried when this process exits.",
+        file=sys.stderr,
+    )
 
 
 def _register_proc(proc: subprocess.Popen) -> None:
@@ -177,8 +220,15 @@ def _release_proc(proc: subprocess.Popen) -> None:
         _LIVE_PROCS.discard(proc)
 
 
-def cleanup_owned() -> None:
+def cleanup_owned() -> list[str]:
     """Kill our children and remove the probe roots *this process* created.
+
+    Returns the roots that are still on disk, still registered, for whoever
+    sweeps next. Same rule as :func:`_release_root`: a root is forgotten only
+    once it is gone. This runs more than once in a normal interrupted run --
+    from ``run_eval``'s unwind and again from the exit sweep -- and the second
+    call is the one that succeeds after the process holding a directory has
+    died, so it must still be able to see it.
 
     Deliberately never sweeps %TEMP% for other processes' probe roots by
     prefix: a concurrent run's in-flight probe must not have its command file
@@ -194,33 +244,81 @@ def cleanup_owned() -> None:
                 proc.wait(timeout=5)
         except Exception:
             pass
-    for root in roots:
-        _rmtree_retry(Path(root))
+    removed = {root for root in roots if _rmtree_retry(Path(root))}
     with _OWNED_LOCK:
-        _OWNED_ROOTS.difference_update(roots)
+        _OWNED_ROOTS.difference_update(removed)
         _LIVE_PROCS.difference_update(procs)
+    return [root for root in roots if root not in removed]
+
+
+def _final_cleanup() -> None:
+    """The exit sweep, and the last chance to say what it could not remove."""
+    for root in cleanup_owned():
+        print(
+            f"Warning: probe root {root} could not be removed and is left behind. "
+            f"If --scaffold was used it holds a copy of that tree; delete it by hand.",
+            file=sys.stderr,
+        )
 
 
 def install_cleanup_handlers() -> None:
     """Register cleanup on normal exit and on the signals we can catch.
 
-    atexit alone does not survive SIGTERM/Ctrl-C, and neither survives SIGKILL /
-    Stop-Process -Force. Nothing in-process can; the mitigation for that case is
-    that the only thing stranded is an empty directory under the OS temp dir,
-    never a file inside the user's project or home.
+    **SIGINT is left to** ``signal.default_int_handler``, deliberately. Handling
+    it here instead was the defect: that replaced the one handler that raises
+    ``KeyboardInterrupt``, so Ctrl-C never unwound ``run_eval``'s scheduling
+    loop and the ``except BaseException`` branch that cancels the queued futures
+    was dead code under the CLI. What ran in its place was ``cleanup_owned()``
+    on the main thread -- a snapshot, then a kill with ``wait(timeout=5)`` per
+    child and up to ~3s of rmtree backoff per root -- while the pool's worker
+    threads were still alive and still dequeuing. Every worker that finished
+    during those seconds started a fresh *billed* ``claude`` for the next queued
+    job. Those children were registered after the snapshot and were still
+    running when ``os.kill(os.getpid(), signum)`` landed under SIG_DFL, where
+    atexit does not fire. Ctrl-C therefore kept spending and then orphaned what
+    it had bought.
+
+    The other signals get a handler that raises ``KeyboardInterrupt`` in the
+    main thread, so they unwind through that same path rather than a second one
+    of their own. Nothing here calls :func:`cleanup_owned`: a signal handler
+    runs on the main thread, ``_OWNED_LOCK`` is not reentrant, and a handler
+    that took it while the main thread already held it would hang the process
+    instead of stopping it.
+
+    What actually stops the spend is :data:`_INTERRUPTED`, which the handler
+    sets and which ``run_single_query`` reads before it launches anything. The
+    main thread's promptness is then not on the critical path -- which matters,
+    because on Windows only SIGINT breaks a blocking wait.
+
+    atexit does not survive SIGKILL / Stop-Process -Force, and nothing
+    in-process can. What is stranded then is a probe root under the OS temp dir:
+    empty when no ``--scaffold`` was given, and otherwise holding a copy of the
+    scaffold tree. Nothing is ever stranded inside the user's project or home.
     """
     global _CLEANUP_INSTALLED
     if _CLEANUP_INSTALLED:
         return
     _CLEANUP_INSTALLED = True
-    atexit.register(cleanup_owned)
+    atexit.register(_final_cleanup)
 
     def _handler(signum, _frame):
-        cleanup_owned()
-        signal.signal(signum, signal.SIG_DFL)
-        os.kill(os.getpid(), signum)
+        # Set first, so the workers stop launching even if the raise below has
+        # to wait for the main thread to reach a bytecode boundary.
+        _INTERRUPTED.set()
+        raise KeyboardInterrupt(f"terminated by signal {signum}")
 
-    for name in ("SIGINT", "SIGTERM", "SIGBREAK", "SIGHUP"):
+    sigint = getattr(signal, "SIGINT", None)
+    if sigint is not None:
+        try:
+            # Never over SIG_IGN: a parent that ignored the signal said so, and
+            # POSIX convention is to leave that alone.
+            if signal.getsignal(sigint) is not signal.SIG_IGN:
+                signal.signal(sigint, signal.default_int_handler)
+        except (ValueError, OSError):
+            # Not the main thread, or unsupported on this platform.
+            pass
+
+    for name in ("SIGTERM", "SIGBREAK", "SIGHUP"):
         sig = getattr(signal, name, None)
         if sig is None:
             continue
@@ -795,8 +893,9 @@ def run_single_query(
       ``error``       — anything else. Never scored.
 
     ``status == "error"`` covers timeouts, non-zero child exits, a stream that
-    ends without a ``result`` event, and any exception raised while setting the
-    probe up. None of those are observations about the description.
+    ends without a ``result`` event, an interrupted run, and any exception
+    raised while setting the probe up. None of those are observations about the
+    description.
     """
     unique_id = uuid.uuid4().hex[:8]
     clean_name = f"{skill_name}-skill-{unique_id}"
@@ -822,6 +921,14 @@ def run_single_query(
     start = time.time()
 
     try:
+        # A worker that was already queued when the run was interrupted must not
+        # buy a session nobody is left to wait for. Checked here so a refused
+        # probe does not even create a directory.
+        if _INTERRUPTED.is_set():
+            record["stop_reason"] = "interrupted"
+            record["error"] = "run was interrupted before this probe launched"
+            return record
+
         probe_root = _make_probe_root(scaffold)
         record["probe_root"] = str(probe_root)
         command_file = probe_root / ".claude" / "commands" / f"{clean_name}.md"
@@ -871,6 +978,15 @@ def run_single_query(
             bufsize=1,
         )
         _register_proc(proc)
+
+        # Re-read after registration, because the window between the check above
+        # and Popen is exactly where an interrupt would otherwise buy a whole
+        # session that then runs to --timeout while the process waits to exit.
+        # Returning here runs the `finally` below, which kills the child.
+        if _INTERRUPTED.is_set():
+            record["stop_reason"] = "interrupted"
+            record["error"] = "run was interrupted as this probe launched"
+            return record
 
         out_q: queue.Queue = queue.Queue()
         err_tail: deque = deque(maxlen=40)
@@ -1337,6 +1453,10 @@ def run_eval(
     eval_set = validate_eval_set(eval_set)
 
     install_cleanup_handlers()
+    # A new run is a new decision. Without this an interrupt that stopped an
+    # earlier call would silently refuse every probe in this one -- which reads
+    # as a 100%-errored harness rather than as the stop it was.
+    _INTERRUPTED.clear()
 
     duplicates = len(eval_set) - len({item["query"] for item in eval_set})
     if duplicates:
@@ -1402,6 +1522,12 @@ def run_eval(
                 if record["status"] == "error":
                     print(f"          error: {record['error']}", file=sys.stderr)
     except BaseException:
+        # Order matters. The flag goes up *before* the shutdown, because
+        # cancel_futures only drains what is still queued: a worker that has
+        # already dequeued its job is past that point and is stopped by the flag
+        # instead. Reached by Ctrl-C because SIGINT is left to Python's own
+        # handler; see install_cleanup_handlers.
+        _INTERRUPTED.set()
         executor.shutdown(wait=False, cancel_futures=True)
         cleanup_owned()
         raise
@@ -1727,22 +1853,35 @@ def main():
         assume_yes=args.yes,
     )
 
-    output = run_eval(
-        eval_set=eval_set,
-        skill_name=name,
-        description=description,
-        num_workers=args.num_workers,
-        timeout=args.timeout,
-        runs_per_query=args.runs_per_query,
-        trigger_threshold=args.trigger_threshold,
-        model=args.model,
-        max_tools=args.max_tools,
-        setting_sources=args.setting_sources or None,
-        include_partial_messages=not args.no_partial_messages,
-        permission_mode=args.permission_mode,
-        scaffold=args.scaffold,
-        verbose=args.verbose,
-    )
+    try:
+        output = run_eval(
+            eval_set=eval_set,
+            skill_name=name,
+            description=description,
+            num_workers=args.num_workers,
+            timeout=args.timeout,
+            runs_per_query=args.runs_per_query,
+            trigger_threshold=args.trigger_threshold,
+            model=args.model,
+            max_tools=args.max_tools,
+            setting_sources=args.setting_sources or None,
+            include_partial_messages=not args.no_partial_messages,
+            permission_mode=args.permission_mode,
+            scaffold=args.scaffold,
+            verbose=args.verbose,
+        )
+    except KeyboardInterrupt:
+        # run_eval has already cancelled the queue, stopped the workers from
+        # launching anything else and killed the children it owned. A partial
+        # run is not a measurement, so nothing is written to stdout. 130 is the
+        # conventional Ctrl-C status; a traceback here would say the same thing
+        # less usefully.
+        print(
+            "\nInterrupted: the queued probes were cancelled and no further "
+            "session was started.",
+            file=sys.stderr,
+        )
+        sys.exit(130)
 
     summary = output["summary"]
     print_eval_stats("Results", output["results"])
