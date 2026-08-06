@@ -225,7 +225,13 @@ class ProvenanceIsIntact(unittest.TestCase):
         # directory alone, so a NOTICE left above it never reaches the person the
         # Apache-2.0 attribution term is owed to.
         for name in ("LICENSE.txt", "NOTICE"):
-            self.assertTrue((SKILL_ROOT / name).is_file(), f"{name} is missing")
+            self.assertTrue(
+                (SKILL_ROOT / name).is_file(),
+                f"{name} is missing from the skill directory. Restore it here rather than at "
+                "the repository root: install.sh copies this directory alone, so a licence "
+                "left above it ships to nobody and the installed skill carries no Apache-2.0 "
+                "terms or attribution at all.",
+            )
 
     def test_notice_names_the_upstream_and_disclaims_affiliation(self):
         notice = read(SKILL_ROOT / "NOTICE")
