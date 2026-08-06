@@ -10,7 +10,7 @@
 # So the tag is made here instead, after the checks, by a workflow nothing but a
 # person can start. `workflow_dispatch` is the whole point: the trigger is an
 # operator naming a commit, not a ref appearing. Between the naming and the
-# creating sit the five checks, and `scripts/publish-release.sh` is written so
+# creating sit the six checks, and `scripts/publish-release.sh` is written so
 # that the creating is unreachable when they fail -- the gate is a call inside
 # it, not a step beside it, because a step can be reordered.
 #
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
 
     # Read-only, and `actions: read` for the same reason `release.yml` carries
-    # it: check 5 asks whether `checks` concluded success on a SHA, and that is
+    # it: check 6 asks whether `checks` concluded success on a SHA, and that is
     # an Actions API call the default token cannot make.
     permissions:
       contents: read
@@ -111,7 +111,7 @@ jobs:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
 
-      # Load-bearing rather than hygienic: check 4 compares HEAD against
+      # Load-bearing rather than hygienic: check 5 compares HEAD against
       # `origin/main`, and falls back to a local `main` when no remote-tracking
       # ref exists. A stale or absent `origin/main` is what makes a stale HEAD
       # look current, which is the failure the comparison is standing in front

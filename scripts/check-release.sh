@@ -45,7 +45,7 @@
 # fallback served "I am about to cut this tag", which `--head` now serves by
 # saying so, so the tag branch refuses instead. See it for what exit 2 buys.
 #
-# Five checks, in the order that gives the most useful failure first:
+# Six checks, in the order that gives the most useful failure first:
 #
 #   1. the manifests agree with each other        (bump-version.sh --check)
 #   2. they spell out the tag: both the pack name (a tag that says 0.4.1 and
@@ -53,14 +53,18 @@
 #                                                  no tag -- and so is one that
 #                                                  says `dovetail` and installs
 #                                                  another pack entirely)
-#   3. RELEASE-NOTES.md has an entry for it
-#   4. the commit is on `main`                    (nothing ships off a branch --
+#   3. the marketplace entry installs *this*      (checks 1 and 2 grade what the
+#      repository                                  commit says it is; this is
+#                                                  the field deciding what an
+#                                                  installer receives)
+#   4. RELEASE-NOTES.md has an entry for it
+#   5. the commit is on `main`                    (nothing ships off a branch --
 #                                                  and where that commit is HEAD
 #                                                  it has to *be* `main`, not
 #                                                  merely sit in its history)
-#   5. `checks` concluded success on that SHA     (needs `gh`; see --strict)
+#   6. `checks` concluded success on that SHA     (needs `gh`; see --strict)
 #
-# And one only HEAD mode can ask, between 2 and 3: that the version is not
+# And one only HEAD mode can ask, between 3 and 4: that the version is not
 # already released at some other commit. In explicit-tag mode the tag exists at
 # the commit under test by definition, so the question is empty there. It reads
 # `refs/tags/`, so a clone without tags cannot answer it -- and says so rather
@@ -71,7 +75,7 @@
 # the version it compares against came out of the manifests it is comparing. It
 # prints what HEAD would ship instead of claiming a verdict.
 #
-# Check 4 splits by mode as well, and that seam leaked next. Ancestry is the
+# Check 5 splits by mode as well, and that seam leaked next. Ancestry is the
 # right test for a tag: a released tag is always behind the tip, and being on
 # `main` at all is the whole of what it has to prove. It is the wrong test for
 # HEAD mode, whose question is "is `main` releasable right now?" -- every commit
@@ -91,27 +95,40 @@
 # gone -- see it below for why -- and with it the only case where the two
 # disagreed, so the mode decides again.
 #
-# All five grade the same commit, which took a fix of its own. Checks 1-3 read
-# the files on disk while 4 and 5 read `$SHA`, and nothing tied the two
-# together: the `cd "$ROOT"` below fixes the working tree as the subject of the
-# first three, so an explicit tag was graded for ancestry and CI on its own
-# commit and for version and notes on whatever was checked out. With the
-# tree bumped to 0.5.0 and uncommitted, and `dovetail--v0.5.0` pointing at a
-# commit whose manifests say 0.4.1 and whose notes have no 0.5.0 entry, all five
-# printed `ok`. That is check 2's own "a tag that says 0.4.1 and installs 0.4.0",
-# issued by the gate that exists to refuse it. So the version-bearing files come
-# out of the commit now, through `git show`, and uncommitted work is reported
-# rather than graded -- an installer never receives it.
+# All of them grade the same commit, which took a fix of its own. The
+# manifest-reading checks read the files on disk while ancestry and CI read
+# `$SHA`, and nothing tied the two together: the `cd "$ROOT"` below fixes the
+# working tree as the subject of the former, so an explicit tag was graded for
+# ancestry and CI on its own commit and for version and notes on whatever was
+# checked out. With the tree bumped to 0.5.0 and uncommitted, and
+# `dovetail--v0.5.0` pointing at a commit whose manifests say 0.4.1 and whose
+# notes have no 0.5.0 entry, all five checks there were then printed `ok`. That
+# is check 2's own "a tag that says 0.4.1 and installs 0.4.0", issued by the
+# gate that exists to refuse it. So the version-bearing files come out of the
+# commit now, through `git show`, and uncommitted work is reported rather than
+# graded -- an installer never receives it.
 #
 # That fix moved the version and left the pack *name* behind, and the same shape
 # came back one field over. Check 2 compared only the version, and `$PLUGIN` was
 # read off the checkout, so `dovetail--v8.8.8` at a commit whose manifests say
-# `otherpack` matched on the only half anybody looked at -- and checks 1, 3 and 4
+# `otherpack` matched on the only half anybody looked at -- and checks 1, 4 and 5
 # have no opinion about which pack they are reading. Four `ok`s for a tag that
 # installs somebody else's pack. Check 2 now grades the whole tag, both halves
 # out of `$SHA`, and HEAD mode builds the name it checks from the commit too:
 # built from the checkout, an uncommitted rename pointed the already-released
 # check at a pack with no tags and turned a `FAIL` into a `SKIP`.
+#
+# Widening check 2 to the whole tag closed what a tag can claim, and left open
+# what the commit behind it hands over. Check 3 is that field. A tag is a name
+# and a version; `plugins[0].source` in `.claude-plugin/marketplace.json` is
+# where the marketplace goes to *get* the pack, and it is on no list here -- not
+# `.version-bump.json`'s, so check 1 never opens it, and not the tag's, so check
+# 2 has nothing to compare it to. A commit repointing it at another repository
+# and leaving `name` and `version` alone was a whole ordinary release by every
+# other measure: manifests agreeing, tag matching, notes entry, on `main`,
+# green, exit 0. Check 2's "installs another pack entirely" one field further
+# over, and the only one of these where the tag is not even lying -- the name
+# and the version are this pack's, and the repository behind them is not.
 #
 # Two reads from the checkout survive on purpose. `scripts/bump-version.sh` is
 # copied rather than taken from the commit -- see check 1 -- and the pack name is
@@ -247,7 +264,7 @@ parse_tag() {
 # There were three branches here and the third is gone, which is why the mode
 # alone decides the subject again. It used to fall back to HEAD when the named
 # tag had no ref, so the mode and the commit came apart and `SUBJECT_IS_HEAD`
-# existed to carry the difference to check 4. Nothing parts them now.
+# existed to carry the difference to check 5. Nothing parts them now.
 if [ "$HEAD_MODE" -eq 1 ]; then
   SHA="$(git rev-parse HEAD)"
 # An annotated tag's own object is not the commit it points at, and `git
@@ -268,7 +285,7 @@ else
   #
   # Both readings are named because this branch still cannot tell them apart --
   # and `git ls-remote` would reword that rather than settle it. Even knowing
-  # the tag is published at some SHA, checks 4 and 5 need that commit *here*:
+  # the tag is published at some SHA, checks 5 and 6 need that commit *here*:
   # `merge-base --is-ancestor` against an object this clone lacks is a fatal,
   # not a verdict. The answer would still be "fetch it and ask again", bought
   # with a network call on the one path that needs none.
@@ -377,7 +394,7 @@ fi
 MANIFEST_NAME="${MANIFEST_ID%% *}"
 MANIFEST_VERSION="${MANIFEST_ID##* }"
 
-# HEAD mode still needs a tag *name* -- checks 2 and 3 grade a version string,
+# HEAD mode still needs a tag *name* -- checks 2 and 4 grade a version string,
 # and the tag HEAD would ship is the one HEAD's own manifests spell out, both
 # halves of it, which is why this waits for the snapshot instead of reading the
 # copy on disk. Naming a tag is not resolving one, and HEAD mode resolves none
@@ -471,13 +488,17 @@ if [ "$HEAD_MODE" -eq 1 ]; then
 # The version half was the whole of this check, and the name half was compared
 # against nothing: `$PLUGIN` came off the checkout, so `dovetail--v0.4.1` at a
 # commit whose manifests say `otherpack` matched on the only half that was
-# looked at, and checks 1, 3 and 4 have no opinion about which pack they are
+# looked at, and checks 1, 4 and 5 have no opinion about which pack they are
 # reading. Four `ok`s for a tag that installs somebody else's pack -- this
 # check's own "worse than no tag", one field over.
 #
 # Reachable from the documented local form, `bash scripts/check-release.sh
 # <tag>` from a working clone, whenever a tag is cut across a rename: the
 # checkout carries the new name, the tagged commit still carries the old one.
+#
+# What none of these three branches can see is where the pack comes from. That
+# is check 3, immediately below, and it is not a fourth branch here because it
+# is not a question about the tag: the tag has no source half to disagree with.
 elif [ "${MANIFEST_NAME}--v${MANIFEST_VERSION}" = "$TAG" ]; then
   note ok "the commit's manifests carry $VERSION"
 # Split by which half disagrees, because they are different repairs: a wrong
@@ -488,6 +509,45 @@ elif [ "$MANIFEST_VERSION" != "$VERSION" ]; then
   fail=1
 else
   note FAIL "tag names $PLUGIN, the commit's manifests say $MANIFEST_NAME — a different pack"
+  fail=1
+fi
+
+# 3. Where the pack comes from, which is a different question from what it calls
+# itself. Checks 1 and 2 grade the commit's own account of its identity -- three
+# copies of a version that agree, a name and a version that spell out the tag.
+# `plugins[0].source` is the field a marketplace resolves to fetch the thing, and
+# it is the one an installer actually acts on.
+#
+# Graded in both modes, unlike check 2, because the value it compares against is
+# a constant rather than something read back out of the commit being graded.
+# There is nothing here HEAD mode cannot ask, and the pre-flight is where a
+# repointed entry should be caught -- before it is a published tag.
+#
+# Read from `$SHA` for the reason everything else is: an uncommitted repoint
+# does not ship, and a committed one is invisible from a checkout that has moved
+# on. Snapshotted here rather than relying on check 1 having done it, because
+# check 1 snapshots whatever `.version-bump.json` names and a commit gets to
+# write that file.
+#
+# Exactly `./`, and not a family of spellings that resolve to the same place. A
+# marketplace shipped inside the repository it lists refers to that repository
+# as `./`; a gate that also had to decide whether `.`, `""` or an absolute path
+# inside the checkout counted would be deciding, and this is the same narrowness
+# the tag shape is held to for the same reason. `plugins[0]` because that is the
+# entry `.version-bump.json` already bumps by index (`plugins.0.version`) -- a
+# marketplace here listing a second plugin would need both files widened
+# together, and neither would silently cover it.
+SELF_SOURCE="./"
+
+if ! snapshot .claude-plugin/marketplace.json ||
+   ! MARKETPLACE_SOURCE="$("$PY" -c 'import json,sys;s=json.load(open(sys.argv[1]))["plugins"][0]["source"];print(s if isinstance(s,str) else json.dumps(s))' \
+       "$SNAPSHOT/.claude-plugin/marketplace.json" 2>/dev/null)"; then
+  note FAIL "no readable plugins[0].source in .claude-plugin/marketplace.json at $(git rev-parse --short "$SHA")"
+  fail=1
+elif [ "$MARKETPLACE_SOURCE" = "$SELF_SOURCE" ]; then
+  note ok "the marketplace entry installs this repository ($SELF_SOURCE)"
+else
+  note FAIL "the marketplace entry installs '$MARKETPLACE_SOURCE', not this repository ('$SELF_SOURCE') — the tag would hand an installer somebody else's"
   fail=1
 fi
 
@@ -525,7 +585,7 @@ if [ "$HEAD_MODE" -eq 1 ]; then
   fi
 fi
 
-# 3. The heading format is `## v0.4.1 (2026-08-05)`. Read from the commit, where
+# 4. The heading format is `## v0.4.1 (2026-08-05)`. Read from the commit, where
 # a missing file and a missing entry are the same answer: the release this tag
 # names is undocumented in what it ships.
 if snapshot RELEASE-NOTES.md && grep -q "^## v${VERSION//./\\.} " "$SNAPSHOT/RELEASE-NOTES.md"; then
@@ -535,7 +595,7 @@ else
   fail=1
 fi
 
-# 4. `origin/main` where a remote-tracking ref exists, local `main` otherwise --
+# 5. `origin/main` where a remote-tracking ref exists, local `main` otherwise --
 # a fresh CI checkout has the former, a working clone usually both, and a
 # detached-HEAD checkout of a tag may have neither.
 MAIN=""
@@ -575,7 +635,7 @@ else
   fail=1
 fi
 
-# 5. The one that needed a new script. A run is recorded against the SHA it ran
+# 6. The one that needed a new script. A run is recorded against the SHA it ran
 # on, so `head_sha` is the whole check: it cannot be satisfied by a green
 # ancestor. `status=success` on a workflow run is the run's conclusion, and the
 # matrix reports one run, so both legs are covered by one answer.

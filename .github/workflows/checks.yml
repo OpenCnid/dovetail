@@ -98,7 +98,7 @@ jobs:
       # working tree, and asserts HEAD mode grades HEAD there rather than the
       # tag — that it refuses a HEAD which is merely an ancestor of `main`,
       # while explicit-tag mode, where a released tag is always behind the tip,
-      # still accepts one — and that all five checks grade the commit under test
+      # still accepts one — and that all six checks grade the commit under test
       # rather than the files lying in the working tree.
       #
       # The other input is that commit: grading its files means reading its

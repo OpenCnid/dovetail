@@ -30,7 +30,7 @@
 #              throwaway repository built so that those are different commits --
 #              and each mode holds its subject to the standard its own question
 #              needs: `main`'s tip for HEAD mode, anywhere on `main` for a tag.
-#              Every one of the five checks grades that commit too, rather than
+#              Every one of the six checks grades that commit too, rather than
 #              the files lying in the working tree. The third layer is newest and
 #              answers a different question from the other two: not "is this
 #              input safe?" but "is this the commit the answer is about?" See its
@@ -458,7 +458,7 @@ fi
 
 # ------------------------------------------------------ ancestry is not enough
 # Grading HEAD is only half of "is `main` releasable right now?". The other half
-# is what counts as an acceptable HEAD, and check 4 used to answer it with
+# is what counts as an acceptable HEAD, and check 5 used to answer it with
 # `git merge-base --is-ancestor` in both modes -- which every commit `main` has
 # ever carried satisfies. So the mode assertions above could pass while the gate
 # still returned green about a commit `main` had moved past.
@@ -471,7 +471,7 @@ fi
 #
 # The fixture already holds the two commits this needs; park HEAD on the tagged
 # one and `main` stays a commit ahead, which is that dispatch exactly. The tag
-# still points at HEAD here, so the already-released check passes and check 4 is
+# still points at HEAD here, so the already-released check passes and check 5 is
 # the only thing that can fail -- which is what makes the exit code below mean
 # one specific thing.
 echo
@@ -511,7 +511,7 @@ else
 fi
 
 # And back onto the tip: the controls below run HEAD mode again and need a HEAD
-# that passes check 4, or they would report the tag state they are testing.
+# that passes check 5, or they would report the tag state they are testing.
 git -C "$FIXTURE" checkout -q main
 
 # A control for the two HEAD-mode assertions above. Drop this version's tag,
@@ -993,7 +993,11 @@ fi
 
 ESCAPE_FIXTURE="$TMP/escape-fixture"
 mkdir -p "$ESCAPE_FIXTURE/.claude-plugin" "$ESCAPE_FIXTURE/scripts"
-cp .claude-plugin/plugin.json "$ESCAPE_FIXTURE/.claude-plugin/"
+# `marketplace.json` is here for check 3, which reads `plugins[0].source` out of
+# the commit whether or not `.version-bump.json` names the file. Without it this
+# fixture fails that check on every leg, and the control below -- the one that
+# has to exit 0 -- would be reporting check 3 while claiming to report check 1.
+cp .claude-plugin/plugin.json .claude-plugin/marketplace.json "$ESCAPE_FIXTURE/.claude-plugin/"
 cp RELEASE-NOTES.md "$ESCAPE_FIXTURE/"
 cp scripts/check-release.sh scripts/bump-version.sh "$ESCAPE_FIXTURE/scripts/"
 
@@ -1002,8 +1006,9 @@ git -C "$ESCAPE_FIXTURE" symbolic-ref HEAD refs/heads/main
 git -C "$ESCAPE_FIXTURE" config core.autocrlf false
 
 # Commits a `.version-bump.json` listing `$1` as its one path. HEAD stays on
-# `main`'s tip and the notes and manifests are this pack's own, so check 1 is the
-# only check that can fail below -- which is what makes the exit code mean one
+# `main`'s tip and the notes and manifests are this pack's own -- including the
+# marketplace entry, which check 3 reads regardless of this list -- so check 1 is
+# the only check that can fail below, which is what makes the exit code mean one
 # specific thing. `newline="\n"` for the reason bump-version.sh uses it: the
 # fixture sets `core.autocrlf false`, and a CRLF manifest is a file that never
 # matches its commit.
@@ -1097,6 +1102,148 @@ elif [ "$rc" -ne 0 ]; then
   fail=1
 else
   note ok ".claude-plugin/plugin.json — an ordinary path still snapshots and grades"
+fi
+
+# ------------------ the tag names this pack, and installs another repository
+# The three sections above put the tree and the commit at odds about what the
+# pack *is* — its version, then its name. This one is about what it hands an
+# installer, which nothing graded at all.
+#
+# `plugins[0].source` in `.claude-plugin/marketplace.json` is the field a
+# marketplace resolves to fetch the pack. It reads `./` because this marketplace
+# ships inside the repository it lists. It is not on `.version-bump.json`'s
+# list, so check 1 never sees it; check 2 compares a name and a version and has
+# no opinion about it; and a notes entry, ancestry and a CI run are all answers
+# about something else.
+#
+# Measured before the fix, in this fixture's shape: a commit repointing that one
+# field at another repository, with `name` and `version` left untouched, printed
+# `release <tag> at <that commit>` and five `ok`s, exit 0. That is check 2's own
+# "a tag that says `dovetail` and installs another pack entirely" — one field
+# further over than the name was, and this time the tag is not even lying. The
+# name and the version are the pack's own; the repository behind them is not.
+#
+# Reachable from every route, unlike the two sections above. Those needed the
+# tree and the commit to diverge, so a tag push could not reach them — there the
+# checkout *is* the tag. Here nothing has to diverge: the field is simply in the
+# commit, and was never read.
+echo
+echo "behaviour — the marketplace entry installs another repository"
+
+# The rename the section above left on disk was never committed, and everything
+# below builds commits out of this tree. Put it back rather than carry it.
+git -C "$FIXTURE" checkout -q -- .claude-plugin/plugin.json
+
+SELF_SOURCE="./"
+FOREIGN_SOURCE="https://github.com/somebody-else/not-this-pack"
+REPOINTED_VERSION="6.6.6"
+REPOINTED_TAG="${PACK}--v$REPOINTED_VERSION"
+
+# `newline="\n"` for the same reason set_pack_name uses it: the fixture sets
+# `core.autocrlf false`, and a manifest rewritten with CRLF would show up as a
+# whole-file change and as a tree that never matches its commit.
+set_marketplace_source() {
+  "$PYJSON" - "$FIXTURE/.claude-plugin/marketplace.json" "$1" <<'PY'
+import json, sys
+path, source = sys.argv[1], sys.argv[2]
+data = json.load(open(path))
+data["plugins"][0]["source"] = source
+with open(path, "w", newline="\n") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
+# A whole, ordinary release — bumped with the pack's own tool, notes entry and
+# all — with exactly one field moved. Everything a release is graded on agrees
+# with itself; the pack it installs is somebody else's.
+bash "$FIXTURE/scripts/bump-version.sh" "$REPOINTED_VERSION" >/dev/null
+printf '\n## v%s (2026-08-06)\n\nThis pack, from another repository.\n' "$REPOINTED_VERSION" >> "$FIXTURE/RELEASE-NOTES.md"
+set_marketplace_source "$FOREIGN_SOURCE"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "repoint the marketplace entry"
+REPOINTED="$(git -C "$FIXTURE" rev-parse HEAD)"
+REPOINTED_SHORT="$(git -C "$FIXTURE" rev-parse --short "$REPOINTED")"
+git -C "$FIXTURE" tag "$REPOINTED_TAG" "$REPOINTED"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$REPOINTED"
+
+# This section's canary, and it carries the case as well as guarding it: the
+# commit has to be repointed *and* still be this pack under this version, or the
+# assertions below could be caught by check 2 and prove nothing about the field
+# they name. A `set_marketplace_source` that wrote nowhere lands here quietly.
+REPOINTED_SOURCE="$(git -C "$FIXTURE" show "$REPOINTED:.claude-plugin/marketplace.json" \
+  | "$PYJSON" -c 'import json,sys;print(json.load(sys.stdin)["plugins"][0]["source"])')"
+REPOINTED_NAME="$(git -C "$FIXTURE" show "$REPOINTED:.claude-plugin/plugin.json" \
+  | "$PYJSON" -c 'import json,sys;print(json.load(sys.stdin)["name"])')"
+
+if [ "$REPOINTED_SOURCE" = "$FOREIGN_SOURCE" ] && [ "$REPOINTED_NAME" = "$PACK" ]; then
+  note ok "fixture: $REPOINTED_SHORT is $REPOINTED_NAME $REPOINTED_VERSION, installed from $REPOINTED_SOURCE"
+else
+  note FAIL "fixture: $REPOINTED_SHORT is $REPOINTED_NAME installed from $REPOINTED_SOURCE — the assertions below prove nothing"
+  fail=1
+fi
+
+# Explicit-tag mode. The second leg is the one that makes this a test of the
+# source field rather than of the fixture: check 2 has to *pass* here, or the
+# exit code below is check 2's verdict wearing this section's name.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$REPOINTED_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $REPOINTED_TAG at $REPOINTED_SHORT"; then
+  note FAIL "$REPOINTED_TAG — did not grade the tagged commit ($REPOINTED_SHORT)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "the commit's manifests carry $REPOINTED_VERSION"; then
+  note FAIL "$REPOINTED_TAG — check 2 failed too; the exit code below would not be the source check's"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "$REPOINTED_TAG — exit $rc, expected 1 ($REPOINTED_SHORT installs from $FOREIGN_SOURCE)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "$FOREIGN_SOURCE"; then
+  note FAIL "$REPOINTED_TAG — refused without naming the repository it would install from"
+  fail=1
+else
+  note ok "$REPOINTED_TAG — refused: the name and version are $PACK's, the source is not"
+fi
+
+# HEAD mode asks the same question, and it is the one asked before anybody tags
+# anything. The repointed commit is HEAD, `main`'s tip and the tag's own commit
+# here, so every other check passes and this exit code has one cause.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $REPOINTED_TAG at $REPOINTED_SHORT"; then
+  note FAIL "--head — did not grade HEAD ($REPOINTED_SHORT)"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "--head — exit $rc, expected 1 (HEAD installs from $FOREIGN_SOURCE)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "$FOREIGN_SOURCE"; then
+  note FAIL "--head — refused without naming the repository it would install from"
+  fail=1
+else
+  note ok "--head — the pre-flight refuses it too, before there is a tag to blame"
+fi
+
+# The control, and the reason the two above are about the source rather than
+# about 6.6.6. Point the entry back at this repository, commit, move the tag to
+# that commit: same version, same tag name, and it passes.
+set_marketplace_source "$SELF_SOURCE"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "point the marketplace entry back at this repository"
+RESTORED="$(git -C "$FIXTURE" rev-parse HEAD)"
+RESTORED_SHORT="$(git -C "$FIXTURE" rev-parse --short "$RESTORED")"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$RESTORED"
+git -C "$FIXTURE" tag -d "$REPOINTED_TAG" >/dev/null
+git -C "$FIXTURE" tag "$REPOINTED_TAG" "$RESTORED"
+
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$REPOINTED_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $REPOINTED_TAG at $RESTORED_SHORT"; then
+  note FAIL "$REPOINTED_TAG — repointed back, but the tag no longer resolves to $RESTORED_SHORT"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "$REPOINTED_TAG — installs from $SELF_SOURCE and still does not pass (exit $rc)"
+  fail=1
+else
+  note ok "$REPOINTED_TAG — the entry pointing at this repository still passes"
 fi
 
 echo

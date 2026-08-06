@@ -64,7 +64,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Belt and braces: check 4 needs `origin/main` to exist, and which
+      # Belt and braces: check 5 needs `origin/main` to exist, and which
       # remote-tracking refs a tag build ends up with is not the thing to bet a
       # release gate on. Idempotent, and free once the objects are local.
       #

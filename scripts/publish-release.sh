@@ -183,10 +183,10 @@ note ok "$TAG is not published, here or on origin"
 
 # ------------------------------------------------------------------- the gate
 # Not a step beside this script but a call inside it. `check-release.sh` is the
-# five checks and this adds none of its own to them; what it adds is that the
+# six checks and this adds none of its own to them; what it adds is that the
 # writes below are unreachable when it exits non-zero.
 #
-# `--strict` because the check this exists for is check 5 -- did `checks`
+# `--strict` because the check this exists for is check 6 -- did `checks`
 # conclude success on this exact SHA -- and without `gh` that check does not run
 # at all. A publish path that silently skipped it would be publishing on the
 # strength of the four checks that never needed CI.

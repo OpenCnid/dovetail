@@ -119,16 +119,17 @@ enclosing marketplace entry disagree. Add an entry to `RELEASE-NOTES.md`, then
 tag from a commit that is already on `main`.
 
 Run `bash scripts/check-release.sh` before you tag and read what it says. It
-asks the five things a release can get wrong — manifests agreeing, manifests
-matching the tag, a notes entry, the commit being on `main` (and where that
-commit is HEAD, *being* `main`), and `checks` having concluded success **on that
-exact SHA** — and `.github/workflows/release.yml`
+asks the six things a release can get wrong — manifests agreeing, manifests
+matching the tag, the marketplace entry installing *this* repository, a notes
+entry, the commit being on `main` (and where that commit is HEAD, *being*
+`main`), and `checks` having concluded success **on that exact SHA** — and
+`.github/workflows/release.yml`
 asks them again when the tag is pushed. The last one is the reason the script
 exists: `checks.yml` runs on commits, so a tag can point at anything, and at
 `0.4.0` it pointed at the commit before four green fixes for as long as nobody
 looked.
 
-**It has two modes, and the mode decides which commit those five are asked
+**It has two modes, and the mode decides which commit those six are asked
 about.** With no tag named — or with `--head`, which says the same thing out
 loud — it grades `git rev-parse HEAD` and resolves no tag to find its subject.
 (It does look one up, later and for one question only: whether the version HEAD
@@ -172,8 +173,8 @@ where mode and commit disagreed, so **the mode decides again**. `release.yml`'s
 `Fetch main` step is load-bearing for the comparison, since a stale
 `origin/main` makes a stale HEAD look current.
 
-**All five grade that commit, and none of them grades a file off the disk.** The
-first three used to. `check-release.sh` `cd`s to the repository root, so
+**All of them grade that commit, and none of them grades a file off the disk.**
+The manifest-reading ones used to. `check-release.sh` `cd`s to the repository root, so
 manifest agreement, the version comparison and the notes entry were answered
 from the working tree while ancestry and CI were answered about the resolved
 SHA, and nothing required those to be one commit or the tree to be clean. With
@@ -232,6 +233,31 @@ send the reader to `bump-version.sh --check`, which reads the list on disk, wher
 the path is fine, and passes. The tag was the input everyone looked at; this was
 the other one, and it arrived with the fix above.
 
+**Widening check 2 closed what a tag can claim and left open what the commit
+behind it hands over.** A tag is a name and a version, and both are now graded
+against the commit — but `plugins[0].source` in `.claude-plugin/marketplace.json`
+is where a marketplace goes to *get* the pack, and it was on nobody's list.
+`.version-bump.json` names version fields, so check 1 never opened it; the tag
+has no source half, so check 2 had nothing to compare it against; a notes entry
+is keyed on the version, ancestry is a question about a commit, and a CI run is
+a question about a SHA. A commit repointing that one field at another
+repository, with `name` and `version` untouched, was a whole ordinary release by
+every other measure — five `ok`s and exit 0 for a tag that hands an installer
+somebody else's repository under this pack's name. That is check 2's own "a tag
+that says `dovetail` and installs another pack entirely", one field further
+over, and the only one of these where the tag is not lying: the name and the
+version really are this pack's. **Check 3 grades it, in both modes**, against
+`./` exactly — the way a marketplace shipped inside the repository it lists
+refers to that repository, held as narrowly as the tag shape is and for the same
+reason. It is also the first of these reachable from every route, including a
+tag push: the earlier two needed the tree and the commit to diverge, and this
+one needs only the commit.
+
+Its neighbour is not graded and is worth knowing about: `plugins[0].name` is
+compared against nothing here either. `claude plugin tag` refuses to tag when
+`plugin.json` and a `strict: true` marketplace entry disagree, so that one has a
+second reader; `source` had none.
+
 **Two reads from the checkout survive, deliberately.** The pack name is read
 there once, before any commit is resolved, because parsing the tag needs a name
 and there is nothing else to take one from yet — that is a shape test against
@@ -257,7 +283,7 @@ have installed, which is the repair this repository refuses.
 So the tag is made by `.github/workflows/release-publish.yml`, which nothing but
 a person can start. It takes a commit SHA, the version that commit ships, and a
 confirmation defaulting to `dry-run`, and between the naming and the creating
-sit the same five checks. `scripts/publish-release.sh` is where the order is
+sit the same six checks. `scripts/publish-release.sh` is where the order is
 held: the gate is a call inside it rather than a step beside it, because a step
 can be reordered and a function cannot be persuaded to return before it is
 called. Run by hand with `--dry-run` it writes nothing and reports what would
@@ -285,7 +311,7 @@ create a release at all.
 
 **Two jobs, split on what they may do rather than on what they check.**
 `validate` holds `contents: read` and `actions: read` — the second because
-check 5 is an Actions API call the default token cannot otherwise make — and
+check 6 is an Actions API call the default token cannot otherwise make — and
 runs the script in the mode that cannot write. `publish` holds `contents:
 write`, which creates the tag object, the ref and the release, and buys nothing
 else. A permission granted for the last step of a run is granted for all of it,
@@ -362,7 +388,7 @@ the tag to the script through `env: RELEASE_TAG` and expands it quoted, because
 parses it, and a tag name is chosen by whoever pushes the tag.
 `scripts/test-release-check.sh` holds both halves of that in place, pins which
 commit each mode grades, which commits each mode will accept, and that every one
-of the five checks grades that commit rather than the files on disk — in a
+of the six checks grades that commit rather than the files on disk — in a
 throwaway repository it builds with a tag, a later commit on `main`, and a
 working tree bumped to a version neither commit carries, so the two answers are
 different commits, the tagged one is an ancestor HEAD mode must refuse while

@@ -33,7 +33,7 @@
 # assertion that no write was logged cannot pass by way of a log nothing could
 # ever have been written to.
 #
-# `gh` is stubbed throughout. The stub answers check 5 in the affirmative, which
+# `gh` is stubbed throughout. The stub answers check 6 in the affirmative, which
 # `test-release-check.sh` deliberately never does -- its stub exits 1 so the
 # gate takes the documented skip. Here the gate has to actually pass, because
 # what is under test is what happens *after* it does.
@@ -204,7 +204,7 @@ echo "behaviour — publish-release.sh refuses before it writes"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# The stub. It records every invocation and answers check 5 in the affirmative,
+# The stub. It records every invocation and answers check 6 in the affirmative,
 # so the gate passes and what happens next is what is being measured. `--jq` is
 # consumed rather than honoured: the one read `check-release.sh` makes asks for
 # a count, and a count is what this prints.
