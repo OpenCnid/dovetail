@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# test-release-check.sh — prove a hostile tag name stays text.
+# test-release-check.sh — prove a hostile tag name stays text, and that each
+# mode grades the commit it says it grades.
 #
 # The release gate takes exactly one input from outside the repository: the name
 # of the tag that triggered it. Whoever pushes the tag chooses those bytes, and
@@ -13,7 +14,7 @@
 # substitution, and it ran on the runner with the workflow's token in the
 # environment.
 #
-# Two layers, checked apart because they fail apart:
+# Three layers, checked apart because they fail apart:
 #
 #   static     no workflow hands an attacker-nameable context to a `run:` body.
 #              This checks the class rather than the instance: `github.ref_name`
@@ -24,6 +25,11 @@
 #   behaviour  check-release.sh, handed those strings directly, refuses them,
 #              quotes them back verbatim, and leaves behind no file that a
 #              substitution would have created.
+#   modes      HEAD mode grades HEAD and explicit-tag mode grades the tag, in a
+#              throwaway repository built so that those are different commits.
+#              The third layer is newest and answers a different question from
+#              the other two: not "is this input safe?" but "is this the commit
+#              the answer is about?" See its own block further down.
 #
 # The behaviour layer fires its own canary first. Assertions that a file did not
 # appear are free if nothing could have written one, and an unwritable temp
@@ -147,6 +153,36 @@ else
   fail=1
 fi
 
+# The dispatch path has to name its mode rather than leave it to be inferred
+# from an empty argument, which is what it did while the inference was wrong.
+if grep -qF 'check-release.sh --strict --head' .github/workflows/release.yml; then
+  note ok "release.yml asks for HEAD mode explicitly"
+else
+  note FAIL "release.yml no longer passes --head on the dispatch path"
+  fail=1
+fi
+
+# `github.ref_type` is `tag` for a dispatch launched from a tag ref as well as
+# for a tag push, so it cannot tell the two events apart; `github.event_name`
+# can. This pins the field the mode is chosen on, not the shape of the steps.
+if grep -q "if: github.event_name" .github/workflows/release.yml; then
+  note ok "release.yml selects the mode on github.event_name"
+else
+  note FAIL "release.yml no longer selects the mode on github.event_name"
+  fail=1
+fi
+
+# HEAD mode's already-released check reads `refs/tags/`, and `fetch-depth: 0` is
+# the line that puts tags on the runner. Without it the check cannot fire, and
+# the dispatch run goes green on a version that is already published — the
+# original bug, restored by checkout configuration rather than by code.
+if grep -qF 'fetch-depth: 0' .github/workflows/release.yml; then
+  note ok "release.yml checks out with tags (fetch-depth: 0)"
+else
+  note FAIL "release.yml no longer fetches tags — the already-released check cannot fire"
+  fail=1
+fi
+
 # --------------------------------------------------------------- behaviour
 echo
 echo "behaviour — check-release.sh against hostile tag text"
@@ -251,6 +287,170 @@ if printf '%s\n' "$out" | grep -q '^No tag given'; then
   note ok "an empty argument still means HEAD (the workflow_dispatch path)"
 else
   note FAIL "an empty argument no longer means HEAD (exit $rc)"
+  fail=1
+fi
+
+# --------------------------------------------------------------------- modes
+# What this catches, stated as the bug it was written from: run with no tag,
+# check-release.sh printed "checking HEAD" and then, from the moment the
+# manifests' own tag existed, graded that tag's commit instead. Every commit
+# that landed on `main` afterwards keeping the same version inherited a verdict
+# about `313b9e4`. `workflow_dispatch` ran exactly that path, so the workflow
+# advertised as answering "is main releasable right now?" answered about a
+# commit two releases back, and answered green.
+#
+# Nothing above would have seen it. The empty-argument assertion greps the
+# banner for `No tag given` and stops; no test in this file has ever looked at
+# *which commit* the gate chose, which is the only thing that distinguishes the
+# two modes at all.
+#
+# So this needs a repository where the two answers differ, and builds one: the
+# six files the gate reads, a commit, a tag on it, and a later commit carrying
+# the same version. That is the shape `main` takes the moment anything lands
+# after a release.
+#
+# Built rather than cloned, for two measured reasons (2026-08-06, git
+# 2.47.1.windows.1). `git clone` of this repository exits 128 on Windows --
+# `skills/better-skill-creator/tests/fixtures/` passes MAX_PATH, checkout
+# aborts, 487 paths never arrive -- and `checks.yml` runs this script on
+# `windows-latest`. And a clone's `origin/main` is frozen at clone time, so a
+# commit made after it fails the ancestry check for a reason with nothing to do
+# with what is under test.
+echo
+echo "behaviour — the commit each mode actually grades"
+
+# Selected the way check-release.sh selects it (`:65`), and separately from the
+# PyYAML-capable `$PY` above: this needs `json`, which every python has, and the
+# static layer's interpreter may legitimately be absent.
+command -v python3 >/dev/null 2>&1 && PYJSON=python3 || PYJSON=python
+
+FIXTURE="$TMP/fixture"
+mkdir -p "$FIXTURE/.claude-plugin" "$FIXTURE/scripts"
+cp .claude-plugin/plugin.json .claude-plugin/marketplace.json "$FIXTURE/.claude-plugin/"
+cp .version-bump.json RELEASE-NOTES.md "$FIXTURE/"
+cp scripts/check-release.sh scripts/bump-version.sh "$FIXTURE/scripts/"
+
+# Read out of the manifest, not written here, so the next version bump does not
+# leave this section asserting against a tag nobody will cut.
+FIXTURE_TAG="$("$PYJSON" -c 'import json;d=json.load(open(".claude-plugin/plugin.json"));print(d["name"]+"--v"+d["version"])')"
+
+# `-c init.defaultBranch` silences the hint on git >= 2.28 and `symbolic-ref`
+# names the branch on anything older, where `init -b` does not exist. The gate
+# needs a ref called `main` either way.
+git -C "$FIXTURE" -c init.defaultBranch=main init -q
+git -C "$FIXTURE" symbolic-ref HEAD refs/heads/main
+
+# The repository root carries `.gitattributes` pinning `eol=lf`; a fixture built
+# by hand inherits only whatever `core.autocrlf` the box has. Off, so the copied
+# scripts stay byte-identical and git stops warning about a rewrite nobody here
+# wants -- a shell script checked out with CRLF fails as `$'\r': command not
+# found`, which reads as the gate being broken.
+git -C "$FIXTURE" config core.autocrlf false
+
+# Identity per-invocation. A hosted runner has none configured and a bare
+# `git commit` exits 128 there; `-c` writes to no config file.
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "release $FIXTURE_TAG"
+git -C "$FIXTURE" tag "$FIXTURE_TAG"
+RELEASED="$(git -C "$FIXTURE" rev-parse HEAD)"
+
+# The later commit. It adds a new file rather than touching a manifest, so the
+# version the gate reads stays byte-identical to the tagged one -- an unchanged
+# version is exactly the case that produced the false green.
+: > "$FIXTURE/after-the-tag.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "after the tag"
+DESCENDANT="$(git -C "$FIXTURE" rev-parse HEAD)"
+
+# A fresh `git init` has only `refs/heads/main`; the gate prefers
+# `refs/remotes/origin/main` and that is what a CI checkout hands it. Point it
+# at the tip so the ancestry check runs on the ref it will actually meet.
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$DESCENDANT"
+
+RELEASED_SHORT="$(git -C "$FIXTURE" rev-parse --short "$RELEASED")"
+DESCENDANT_SHORT="$(git -C "$FIXTURE" rev-parse --short "$DESCENDANT")"
+
+# This section's canary, and it is not decoration: if either commit silently
+# failed -- a runner with no git identity is how -- HEAD *is* the tagged commit,
+# `--is-ancestor` says ok, and every assertion below passes while proving the
+# opposite of what it claims.
+if [ "$RELEASED" != "$DESCENDANT" ]; then
+  note ok "fixture: $DESCENDANT_SHORT is a later commit than $FIXTURE_TAG ($RELEASED_SHORT)"
+else
+  note FAIL "fixture: HEAD and $FIXTURE_TAG are one commit — the assertions below prove nothing"
+  fail=1
+fi
+
+# Both routes into HEAD mode, against a fixture whose tag exists and points
+# elsewhere. `""` is the argument release.yml's tag step passes when there is no
+# tag; `--head` is what its dispatch step passes now.
+for form in "" "--head"; do
+  label="${form:-<no argument>}"
+  out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$form" 2>&1)" && rc=0 || rc=$?
+
+  if ! printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $DESCENDANT_SHORT"; then
+    note FAIL "$label — HEAD mode did not grade HEAD ($DESCENDANT_SHORT)"
+    fail=1
+  elif printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $RELEASED_SHORT"; then
+    note FAIL "$label — HEAD mode resolved the existing tag ($RELEASED_SHORT)"
+    fail=1
+  elif [ "$rc" -ne 1 ]; then
+    note FAIL "$label — exit $rc, expected 1 (a released version cannot be released again)"
+    fail=1
+  elif ! printf '%s\n' "$out" | grep -qF "is already released, at $RELEASED_SHORT"; then
+    note FAIL "$label — failed, but not because the version is already out"
+    fail=1
+  else
+    note ok "$label — grades $DESCENDANT_SHORT and refuses to re-release $RELEASED_SHORT"
+  fi
+done
+
+# The other half, and what makes the pair a mode test rather than one behaviour
+# described twice: the same repository, the same tag name, the other mode, and a
+# different commit comes back.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$FIXTURE_TAG" 2>&1)" && rc=0 || rc=$?
+if printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $RELEASED_SHORT"; then
+  note ok "$FIXTURE_TAG — explicit-tag mode still grades the tagged commit ($RELEASED_SHORT)"
+else
+  note FAIL "$FIXTURE_TAG — explicit-tag mode no longer resolves the tag (exit $rc)"
+  fail=1
+fi
+
+# A control for the two HEAD-mode assertions above. Drop this version's tag,
+# leave the pack's other tags in place, and the same command on the same commit
+# passes: so the failure was that tag, and not the fixture being unreleasable
+# for some reason nobody named.
+#
+# The other tag is not scenery. "This version is not out yet" and "this clone
+# has no tags" are different states with opposite verdicts, and a control that
+# deleted every tag would assert the second must exit 0 -- which is exactly the
+# fail-open the next case exists to forbid.
+OTHER_TAG="${FIXTURE_TAG%%--v*}--v0.0.1"
+git -C "$FIXTURE" tag "$OTHER_TAG" "$RELEASED"
+git -C "$FIXTURE" tag -d "$FIXTURE_TAG" >/dev/null
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $DESCENDANT_SHORT"; then
+  note ok "--head — this version untagged, the same commit passes"
+else
+  note FAIL "--head — untagged, $DESCENDANT_SHORT still does not pass (exit $rc)"
+  fail=1
+fi
+
+# And the state that is not that at all: no tags here whatsoever. `git clone
+# --depth 1` and `--no-tags` both produce it, as does actions/checkout's
+# default, and from inside the repository it is indistinguishable from a pack
+# that has never shipped. The already-released check reads `refs/tags/`, so in
+# that state it cannot fire -- and a check that cannot fire has to say so, or
+# the gate returns the same green it returned before any of this was fixed.
+#
+# Asserted on the notice rather than on `--strict`: the stub `gh` already fails
+# `--strict` here, so an exit code could not tell the two skips apart.
+git -C "$FIXTURE" tag -d "$OTHER_TAG" >/dev/null
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+if printf '%s\n' "$out" | grep -qF "cannot tell an unreleased version from an unfetched tag"; then
+  note ok "--head — with no tags at all, the check reports that it could not run"
+else
+  note FAIL "--head — with no tags at all, the gate passed without saying what it skipped"
   fail=1
 fi
 
