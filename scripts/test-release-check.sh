@@ -25,7 +25,8 @@
 #   behaviour  check-release.sh, handed those strings directly, refuses them,
 #              quotes them back verbatim, and leaves behind no file that a
 #              substitution would have created.
-#   modes      HEAD mode grades HEAD and explicit-tag mode grades the tag, in a
+#   modes      HEAD mode grades HEAD, explicit-tag mode grades the tag, and a
+#              tag with no ref here is refused rather than stood in for, in a
 #              throwaway repository built so that those are different commits --
 #              and each mode holds its subject to the standard its own question
 #              needs: `main`'s tip for HEAD mode, anywhere on `main` for a tag.
@@ -264,22 +265,51 @@ mkdir -p "$TMP/bin"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/bin/gh"
 chmod +x "$TMP/bin/gh"
 
-out="$(PATH="$TMP/bin:$PATH" bash scripts/check-release.sh dovetail--v0.4.1 2>&1)" && rc=0 || rc=$?
-if [ "$rc" -ne 2 ] && printf '%s\n' "$out" | grep -q '^release dovetail--v0.4.1 at '; then
-  note ok "dovetail--v0.4.1 reaches the checks"
-else
-  note FAIL "dovetail--v0.4.1 was refused as malformed (exit $rc)"
-  fail=1
-fi
+# Whether a well-formed tag *resolves* in this repository is not this
+# repository's to decide, so neither leg below is the assertion: a working clone
+# carries the pack's tags, and `checks.yml` checks out with `actions/checkout`
+# and no `fetch-depth`, which fetches none. The assertion is that both legs are
+# outcomes the convention reached — graded, or refused for having nothing to
+# resolve — and that neither is a rejection of the shape.
+#
+# That split is what removing the tag-mode fallback forces here. This used to
+# grep for `release dovetail--v0.4.1 at ...` and call it "reaches the checks",
+# which held on CI only because the fallback printed that banner over HEAD: the
+# assertion passed by way of the bug it now guards against. What resolving a tag
+# does belongs to the fixture below, which owns its own `refs/tags/`.
+for tag in dovetail--v0.4.1 dovetail--v1.0.0-rc.1; do
+  out="$(PATH="$TMP/bin:$PATH" bash scripts/check-release.sh "$tag" 2>&1)" && rc=0 || rc=$?
+  if printf '%s\n' "$out" | grep -qF "release $tag at "; then
+    note ok "$tag — resolves here, and reaches the checks"
+  elif [ "$rc" -eq 2 ] && printf '%s\n' "$out" | grep -qF "cannot resolve $tag"; then
+    note ok "$tag — absent here, and refused as unresolvable rather than malformed"
+  else
+    note FAIL "$tag — neither graded nor refused as unresolvable (exit $rc)"
+    fail=1
+  fi
+done
 
-# A well-formed tag for a version the manifests do not carry has to fail as a
-# *check*, not as a parse — exit 1 with a reason, which is what tells the two
-# apart when this script is the thing being debugged.
+# The name the fallback used to swallow, and the one whose outcome here does not
+# depend on the environment: no clone of this repository has a `v9.9.9` ref,
+# whatever it fetched. Three ways to get this wrong, so three legs. It must not
+# be refused as malformed — it is well-formed, and exit 2 alone no longer tells
+# those apart, which is the cost of the change this asserts. And above all it
+# must not print a banner: `release <tag> at <commit>` over a tag that resolves
+# to nothing is the `--no-tags` reproduction, verbatim.
 out="$(PATH="$TMP/bin:$PATH" bash scripts/check-release.sh dovetail--v9.9.9 2>&1)" && rc=0 || rc=$?
-if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -q 'tag says 9.9.9'; then
-  note ok "dovetail--v9.9.9 fails the version check rather than the parse"
+if [ "$rc" -ne 2 ]; then
+  note FAIL "dovetail--v9.9.9 — exit $rc, expected 2 (nothing to resolve)"
+  fail=1
+elif printf '%s\n' "$out" | grep -q '^not a dovetail release tag'; then
+  note FAIL "dovetail--v9.9.9 — refused as malformed; it is well-formed and absent"
+  fail=1
+elif printf '%s\n' "$out" | grep -q '^release dovetail--v9.9.9 at '; then
+  note FAIL "dovetail--v9.9.9 — graded a commit under the name of a tag it could not resolve"
+  fail=1
+elif printf '%s\n' "$out" | grep -qF 'cannot resolve dovetail--v9.9.9'; then
+  note ok "dovetail--v9.9.9 — well-formed, unresolvable, refused without grading HEAD"
 else
-  note FAIL "dovetail--v9.9.9 — exit $rc, expected 1 with a version mismatch"
+  note FAIL "dovetail--v9.9.9 — exit 2 without saying the tag could not be resolved"
   fail=1
 fi
 
@@ -498,32 +528,40 @@ else
   fail=1
 fi
 
-# The third way in, and the one the mode flag alone does not describe: a tag
-# named on the command line that has no local ref. The mode is explicit-tag --
-# check 2 grades `$FIXTURE_TAG`'s version against the manifests, a real question
-# there -- but there is no tag to resolve, so the commit graded is HEAD, and
-# check 4 has to hold it to HEAD's standard rather than to a resolved tag's. It
-# is somebody checking a release they are about to cut, from whatever they have
-# checked out, which is how 0.4.0 was cut in the first place.
+# The third way in, which used to be a way in at all: a tag named on the command
+# line that has no local ref. It fell back to grading HEAD, so `git clone
+# --no-tags` was the whole reproduction -- the tag is published, the clone never
+# fetched it, and the gate printed `release <tag> at <HEAD>` and passed. A
+# developer checking a release that had already shipped was told it was fine,
+# about a commit that was not the one they named.
 #
-# The control above already deleted `$FIXTURE_TAG` and left `$OTHER_TAG` behind,
-# so naming it here is exactly that state and costs no extra fixture.
+# That is the state built here. The control above deleted `$FIXTURE_TAG` while
+# `$RELEASED` still exists and `$OTHER_TAG` still points at it, so naming it is
+# exactly a clone that did not fetch the tag, and it costs no extra fixture.
+#
+# The middle leg is the one that matters: not that it exited 2, but that neither
+# commit's SHA appears in the output at all. A refusal that still names a commit
+# is the fallback with a worse exit code.
+#
+# `--strict` shows the 2 is the input's rather than strictness's: the stub `gh`
+# fails `--strict`, so a graded run would come back 1, and this returns before a
+# check runs at all.
 echo
-echo "behaviour — a named tag with no local ref still grades HEAD"
+echo "behaviour — a named tag with no local ref is refused, not stood in for"
 
 git -C "$FIXTURE" -c advice.detachedHead=false checkout -q "$RELEASED"
-out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$FIXTURE_TAG" 2>&1)" && rc=0 || rc=$?
-if ! printf '%s\n' "$out" | grep -qF "no local tag $FIXTURE_TAG; checking HEAD"; then
-  note FAIL "$FIXTURE_TAG — did not take the no-such-tag fallback (exit $rc)"
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --strict "$FIXTURE_TAG" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 2 ]; then
+  note FAIL "$FIXTURE_TAG — no local ref, exit $rc, expected 2 (nothing to resolve)"
   fail=1
-elif ! printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $RELEASED_SHORT"; then
-  note FAIL "$FIXTURE_TAG — fell back, but did not grade HEAD ($RELEASED_SHORT)"
+elif printf '%s\n' "$out" | grep -qE "$RELEASED_SHORT|$DESCENDANT_SHORT"; then
+  note FAIL "$FIXTURE_TAG — no local ref, and the refusal still named a commit"
   fail=1
-elif [ "$rc" -ne 1 ] || ! printf '%s\n' "$out" | grep -qF "commit(s) behind refs/remotes/origin/main"; then
-  note FAIL "$FIXTURE_TAG — graded HEAD but accepted an ancestor of main (exit $rc)"
+elif ! printf '%s\n' "$out" | grep -qF "cannot resolve $FIXTURE_TAG"; then
+  note FAIL "$FIXTURE_TAG — exit 2 without saying the tag could not be resolved"
   fail=1
 else
-  note ok "$FIXTURE_TAG — no local ref: grades HEAD, and to HEAD's standard"
+  note ok "$FIXTURE_TAG — published elsewhere, unfetched here, refused rather than stood in for"
 fi
 git -C "$FIXTURE" checkout -q main
 

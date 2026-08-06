@@ -131,7 +131,12 @@ looked.
 **It has two modes, and the mode decides which commit those five are asked
 about.** With no tag named — or with `--head`, which says the same thing out
 loud — it grades `git rev-parse HEAD` and resolves no tag at all. Name a tag and
-it grades that tag's commit. Run it after the tag exists and the bare form is
+it grades that tag's commit, or **exits 2 when this clone has no ref for it**,
+rather than grading HEAD under that tag's name: `git clone --no-tags` was enough
+to make it report an already-published release as passing, about a commit that
+was not the one asked about. That fallback served "I am about to cut this tag",
+and `--head` serves it by saying so. Run it after the tag exists and the bare
+form is
 still about HEAD, which it was not until this was split: the no-tag form used to
 build a tag name out of the manifests and then resolve it, so from the moment
 `dovetail--v0.4.1` existed it printed "checking HEAD" and graded `313b9e4`. Any
@@ -156,12 +161,11 @@ reported every check `ok` and exited 0, while the commit it was missing was
 `5b36154` — the fix to this gate's own injection hole. Green checks, fixes
 landed afterwards, the gate blessing the state before them: the `0.4.0` shape a
 third time. A run grading HEAD now requires `main`'s tip and names how far
-behind HEAD is; a run grading a resolved tag keeps ancestry. **That line is
-drawn on the commit, not on the mode** — they part company in the third way in,
-where a tag named on the command line has no local ref: the mode is still
-explicit-tag, but there is nothing to resolve, so the subject is HEAD and it
-gets HEAD's standard. That is the "checking a release I am about to cut" path,
-and cutting it from a stale checkout is how `0.4.0` happened. `release.yml`'s
+behind HEAD is; a run grading a resolved tag keeps ancestry. That line used to be
+drawn on the commit rather than on the mode, because a third way in parted them:
+a tag named on the command line with no local ref kept the explicit-tag mode
+while the subject fell back to HEAD. Removing that fallback removed the only case
+where mode and commit disagreed, so **the mode decides again**. `release.yml`'s
 `Fetch main` step is load-bearing for the comparison, since a stale
 `origin/main` makes a stale HEAD look current.
 
