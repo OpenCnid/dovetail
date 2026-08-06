@@ -1,4 +1,12 @@
 <svg viewBox="0 0 880 636" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dovetail, in three tiers. Tier one, what each one gives you: prompt-engineering, it follows what you meant; hypershot-protocol, the shape and never the answer; subagent-composition, a team of you running at once; judge-composition, a court for your own work; self-play, it plays itself to find the move; better-skill-creator, teach it once then prove it; upsum, a memory that never swamps; spark-steering, name the gap before the fix. Tier two, what a group unlocks that no member can: the gate, prompt-engineering plus hypershot-protocol, so no expectation reaches the page, carried in two descriptions, three bodies and the house rule; the clean room, self-play plus subagent-composition plus judge-composition, so a score your wish cannot reach, self-play importing both by name; and what outlives the session, better-skill-creator with the two you type, drawn dashed because it is shared purpose with no import in either direction. Tier three, the eight cut as through dovetails into a corner joint drawn in three dimensions, the tails coloured in runs of two, three and three by their group: each one stands alone, and the pack is an argument about how they fit, not a measured result.">
+  <!-- The banner carries its own canvas rather than inheriting the page's.
+       Every colour below is GitHub-dark's palette: against #0d1117 they run
+       5.9:1 to 7.5:1, and against the white a logged-out visitor gets by
+       default they run 2.5:1 to 3.2:1 — all of them under the 4.5:1 that
+       9.5-10.5px text needs. Transparency does not adapt here, it only fails
+       on one of the two themes. -->
+  <rect width="880" height="636" rx="12" fill="#0d1117"/>
+
   <defs>
     <linearGradient id="ramp" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#58a6ff"/>

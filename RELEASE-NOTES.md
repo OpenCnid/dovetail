@@ -1,5 +1,67 @@
 # Dovetail Release Notes
 
+## v0.4.1 (2026-08-05)
+
+**Nothing a skill does changed. What changed is that the checks now run, on two
+platforms, and the ones that had been asserting the pre-`0.3.0` layout stopped.**
+
+Everything through `0.4.0` shipped from a desk where the suite was run by hand,
+on Windows, when someone remembered. That is how a Linux-only bug survived two
+releases.
+
+- **`.github/workflows/checks.yml` runs the inventory, version, shell-lint and
+  test passes on `ubuntu-latest` and `windows-latest`,** with `fail-fast: false`
+  because when one leg goes red the other leg's result is the interesting half.
+  The matrix earned itself on the first run: `test_run_loop.py`'s C7 case rebuilt
+  a path from a `file://` URI by stripping the scheme textually, which drops the
+  leading slash of a POSIX path. A Windows URI carries a drive letter, so it
+  passed here and failed only on Linux. It uses `url2pathname` now, which also
+  decodes the percent-escapes a temp directory containing a space would produce.
+- **Two licence records and three test paths described a layout that ended at
+  `0.3.0`.** The root `LICENSE.md` still called every skill a pinned submodule;
+  `skills/self-play/LICENSE.md` licensed four files that do not ship and pointed
+  at a `vendor/` tree, a `NOTICE` and a `docs/DEPENDENCIES.md` that exist nowhere
+  here. `test_self_conformance.py` looked for `LICENSE.txt` and `NOTICE` two
+  directories above the skill and called them "repository furniture" — the files
+  were already in the right place and the test was wrong, because `install.sh`
+  copies a skill directory and nothing above it, so a licence left at the root
+  ships to nobody. That consequence is now in the assertion message, where the
+  person who sees the failure reads it, and not only in a comment.
+- **`lint-shell.sh` aborted at its first finding.** `set -euo pipefail` plus a
+  pipe into `head -20` handed `set -e` shellcheck's non-zero status mid-loop: 19
+  lines emitted, no summary, 3 of 5 files reached. Never a false pass — it did
+  exit non-zero — but the script's own docstring promises that a clean run cannot
+  mean nothing was checked, and this was that failure. Since the first offender
+  was `lint-shell.sh` itself, `test-skills.sh` had never been shellcheck'd at all.
+- **31 `.pyc` files were tracked** under `better-skill-creator`'s `scripts/` and
+  `tests/`, so every distributed copy carried one machine's `cpython-313`
+  bytecode. Removed, and `.gitignore` now covers them.
+- **The README was rewritten for the reader who just wants it installed,** with
+  the two routes at the top and the reasoning behind them moved below.
+- **It has the diagram it has been claiming since `0.4.0`.** `docs/assets/
+  banner.svg` draws the pack in three tiers: what each skill gives you alone,
+  what a group unlocks that no member can, and the eight cut as the through
+  dovetail the pack is named for, tails coloured in runs of two, three and three
+  by group. The middle tier labels each panel with how well it is evidenced
+  rather than asserting the same weight for all three — the gate is counted (2
+  descriptions, 3 bodies, the house rule), the clean room is a mechanism
+  (`self-play` imports both by name), and the third is drawn dashed because it
+  is shared purpose with no import in either direction.
+
+Suite after the fixes: 699 passed on Windows, 691 on Linux, 0 failed.
+
+### Why this release exists at all
+
+`0.4.0`'s tag points at the commit before every fix above. All of it landed on
+`main` afterwards and none of it reached anyone installing the published
+release, because nothing connected "the checks are green" to "this is the commit
+that ships". `scripts/check-release.sh` is that connection, and
+`.github/workflows/release.yml` runs it when a tag is pushed: the tagged commit
+has to be on `main`, the manifests have to carry the tag's version,
+`RELEASE-NOTES.md` has to have an entry for it, and the `checks` workflow has to
+have concluded success **on that exact SHA** — not on an ancestor, and not on a
+later commit. A tag that fails any of those is red before anybody installs it.
+
 ## v0.4.0 (2026-08-05)
 
 **The entry skill and the `SessionStart` hook are gone.** The pack ships eight

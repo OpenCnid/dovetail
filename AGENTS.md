@@ -114,3 +114,15 @@ disagree. This is load-bearing rather than tidy: the marketplace entry carries
 `strict: true`, and `claude plugin tag` refuses to tag when `plugin.json` and the
 enclosing marketplace entry disagree. Add an entry to `RELEASE-NOTES.md`, then
 tag from a commit that is already on `main`.
+
+Run `bash scripts/check-release.sh` before you tag and read what it says. It
+asks the five things a release can get wrong — manifests agreeing, manifests
+matching the tag, a notes entry, the commit being on `main`, and `checks` having
+concluded success **on that exact SHA** — and `.github/workflows/release.yml`
+asks them again when the tag is pushed. The last one is the reason the script
+exists: `checks.yml` runs on commits, so a tag can point at anything, and at
+`0.4.0` it pointed at the commit before four green fixes for as long as nobody
+looked.
+
+A published tag is a thing other people have installed. When it is wrong, the
+fix is a new version, not a moved tag.
