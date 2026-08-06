@@ -112,6 +112,18 @@ jobs:
         shell: bash
         run: bash scripts/test-release-check.sh
 
+      # The other half of the same subject, checked apart because it fails
+      # apart: that gate answers whether a release should have happened, and
+      # this asserts there is no route to a tag that does not wait for it. It
+      # reads the permission blocks — the job that can write waits on one that
+      # cannot, and `release.yml`, which starts from a tag push and therefore
+      # runs after the ref exists, holds no write permission at all — then runs
+      # `publish-release.sh` against a throwaway repository on every input that
+      # should stop it, with a stubbed `gh` recording whether anything wrote.
+      - name: Release-publish tests
+        shell: bash
+        run: bash scripts/test-release-publish.sh
+
       - name: Tests
         shell: bash
         working-directory: skills/better-skill-creator

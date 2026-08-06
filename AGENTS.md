@@ -245,6 +245,109 @@ differently, and check 1 silently grades the working tree again. Nothing catches
 that today. So the accurate statement is that no file the checks *grade* is read
 from disk — not that the disk is never opened.
 
+**`release.yml` cannot prevent a bad tag, and the gap this closes is that
+nothing said so.** It runs on `push: tags`, so the ref is on the remote before
+the run exists — a dependency range resolving `dovetail--v*`, or a marketplace
+source pinned with `#ref`, can fetch it while the checks are still starting.
+That workflow audits, and no rearrangement inside it becomes prevention, because
+the event it waits for is the publication. It keeps `contents: read` for that
+reason: write there would buy the ability to delete a tag somebody may already
+have installed, which is the repair this repository refuses.
+
+So the tag is made by `.github/workflows/release-publish.yml`, which nothing but
+a person can start. It takes a commit SHA, the version that commit ships, and a
+confirmation defaulting to `dry-run`, and between the naming and the creating
+sit the same five checks. `scripts/publish-release.sh` is where the order is
+held: the gate is a call inside it rather than a step beside it, because a step
+can be reordered and a function cannot be persuaded to return before it is
+called. Run by hand with `--dry-run` it writes nothing and reports what would
+ship, so the pre-flight survives; `bash scripts/check-release.sh --head` still
+answers the narrower question and neither replaces the other.
+
+**The version is typed twice on purpose.** Every other fact is read out of the
+commit, so a dispatch naming the wrong commit gets a coherent answer about the
+wrong release — every check passes, because they all describe whatever was
+named. `RELEASE_VERSION` is the one assertion the operator makes that the commit
+can contradict. The SHA is forty characters and never a ref name for the same
+reason: `main` names whatever `main` is at the moment each command runs, and
+there are several such moments here, one of them an approval of unbounded
+length.
+
+**The commit released has to be `origin/main`'s tip, not a commit somewhere in
+its history.** That is HEAD mode's standard, inherited rather than replaced with
+a third: releasing an ancestor is the `0.4.0` shape with the operator's blessing
+attached. It is a real restriction — a candidate approved while it was the tip
+is refused once `main` moves, and the repair is to re-dispatch rather than to
+loosen the check. It also buys something unrelated to correctness: a commit that
+is the default branch cannot differ from it under `.github/workflows/`, which is
+the documented condition under which `GITHUB_TOKEN` is refused permission to
+create a release at all.
+
+**Two jobs, split on what they may do rather than on what they check.**
+`validate` holds `contents: read` and `actions: read` — the second because
+check 5 is an Actions API call the default token cannot otherwise make — and
+runs the script in the mode that cannot write. `publish` holds `contents:
+write`, which creates the tag object, the ref and the release, and buys nothing
+else. A permission granted for the last step of a run is granted for all of it,
+so keeping the read-only answer in a job that never held the write is what makes
+"it passed" separable from "it published". `publish` re-runs every check instead
+of trusting `validate`, because the approval between them is exactly when `main`
+can move.
+
+**The tag is annotated, in three calls, ordered for what a failure leaves
+behind.** Every tag this pack has published is annotated and `check-release.sh`
+resolves through the tag object with `git rev-list -n 1`, so a lightweight ref
+would be a quiet change to what the gate reads. The tag object is unreferenced
+until the ref points at it, the ref is the moment the release becomes fetchable,
+and the release object is last, because announcing a tag that does not exist is
+worse than a tag nobody announced.
+
+**None of that stops a tag pushed by hand, and nothing committed here can.**
+That is a GitHub tag ruleset, configured in settings.
+`.github/rulesets/dovetail-release-tags.json` carries it as a reviewable file —
+target `tag`, enforcement `active`, `refs/tags/dovetail--v*`, and the `creation`,
+`update`, `deletion` and `non_fast_forward` rules — but GitHub imports that file
+rather than reading it, so the two stay in step only while somebody re-imports
+after a change. It ships with an empty bypass list, which fails closed: until the
+publishing identity is added there, nothing can cut a release tag, this workflow
+included. `scripts/test-release-publish.sh` asserts the file still names this
+pack, because a rename would otherwise leave a ruleset guarding a namespace
+nothing publishes into — indistinguishable from a working one until the release
+that needs it.
+
+**The identity in that bypass list should be a GitHub App, and not as a
+preference.** `GITHUB_TOKEN` is an App installation token, but whether the
+Actions app can be granted ruleset bypass is documented neither way, so the
+workflow does not depend on it: set `RELEASE_BOT_APP_ID` and the matching key and
+it publishes as an App that can be named in a bypass list, leave them unset and
+it publishes as `github.token`, which is correct until the ruleset is active and
+cannot be after. One documented consequence arrives with the App rather than
+despite it — a tag pushed with `GITHUB_TOKEN` does not trigger workflows that run
+on `push`, so `release.yml` would stay silent about it, while an App token is not
+suppressed that way and the tag is audited on arrival by the path that grades a
+tag rather than a commit.
+
+**That key is an environment secret, and it is the part most easily got wrong.**
+`workflow_dispatch` takes a ref, and the workflow that runs is the copy on that
+ref — so the gate is only the gate for a dispatch from a ref carrying this
+version of the file. Checking out the named SHA protects the scripts, not the
+file deciding which scripts run. A repository secret is readable from a workflow
+on any ref, so a branch carrying a gutted copy of `release-publish.yml` could
+mint the same token; an environment secret is reachable only from a job naming
+that environment, and only from a ref that environment's deployment rule allows.
+Set it to `main`. Required reviewers on the same environment are what make a
+publish something a second person agrees to.
+
+**What this does not cover, said here rather than found later.** The install
+route the README documents adds the marketplace with no `#ref`, and a marketplace
+source of `./` resolves the default branch, so that route receives `main`'s tip
+and consults no tag at all. Measured 2026-08-06: `dovetail--v0.4.1` points at
+`313b9e4`, `origin/main` is at `c0ee549` thirteen commits later, and both carry
+`"version": "0.4.1"` — so a consumer following the README today receives the
+newer tree under the graded version's name. Everything above governs the routes
+that do resolve tags, a dependency range against `dovetail--v*` and a source
+pinned with `#ref`. Nothing yet governs what `main` ships to everyone else.
+
 `release.yml` picks the mode from `github.event_name`, not from `ref_type`: a
 dispatch launched from a tag ref reports `ref_type: tag` too, so `ref_type`
 cannot tell a dispatch from a push.

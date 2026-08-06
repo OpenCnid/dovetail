@@ -1,0 +1,200 @@
+# The half `release.yml` cannot be.
+#
+# `release.yml` runs on `push: tags`. That is the right trigger for what it does
+# and the wrong one for prevention, and no amount of work inside it changes
+# which: by the time a tag-triggered run starts, the ref is on the remote.
+# Anything resolving `dovetail--v*` -- a plugin dependency range, a marketplace
+# source pinned with `#ref` -- can fetch it already. The run can report. It
+# cannot recall.
+#
+# So the tag is made here instead, after the checks, by a workflow nothing but a
+# person can start. `workflow_dispatch` is the whole point: the trigger is an
+# operator naming a commit, not a ref appearing. Between the naming and the
+# creating sit the five checks, and `scripts/publish-release.sh` is written so
+# that the creating is unreachable when they fail -- the gate is a call inside
+# it, not a step beside it, because a step can be reordered.
+#
+# This does not by itself stop a tag being pushed by hand, and nothing in a
+# repository can. That is a GitHub tag ruleset restricting `dovetail--v*`
+# creation to this workflow's identity, and it is configured in settings rather
+# than committed. `.github/rulesets/dovetail-release-tags.json` is that ruleset
+# as a file -- reviewable here, imported there, read by GitHub from neither.
+# See AGENTS.md. Until it is imported, this is the tidy route rather than the
+# only one, and `release.yml` remains the thing that notices a tag that came
+# from somewhere else.
+#
+# One hazard this file cannot close from inside itself, named here because it
+# is the one that would otherwise be discovered late. `workflow_dispatch` takes
+# a ref, and the workflow that *runs* is the copy on that ref -- so the gate
+# below is only the gate for a dispatch from a ref carrying this version of it.
+# Checking out `inputs.sha` protects the scripts, not the file deciding which
+# scripts run. What closes it is the `release` environment: the App key lives
+# there rather than at the repository, and an environment's deployment-branch
+# rule is enforced by GitHub before a job starts. Restricted to `main`, a
+# dispatch from a branch carrying a gutted copy of this file gets no token to
+# publish with. That is a settings change, and it is the reason the secret is
+# scoped to an environment rather than to the repository.
+#
+# Two jobs, split on what they are allowed to do rather than on what they check.
+# They run the same script against the same commit, and `validate` runs it in
+# the mode that cannot write. That is not redundancy: the job that can create a
+# tag holds `contents: write`, and a permission granted for the last step of a
+# run is granted for all of it. Keeping the read-only answer in a job that never
+# had the permission is what makes "it passed" separable from "it published".
+#
+# `publish` re-runs everything rather than trusting `validate`'s verdict, and
+# the reason is the gap between them. `environment:` below is an approval gate,
+# so that gap is however long a human takes -- and `main` moves. A verdict about
+# `main`'s tip is only true of the moment it was taken, so it is taken again in
+# the job that acts on it, immediately before it acts. A dispatch approved after
+# `main` moves on fails there, which is a true answer rather than an
+# inconvenience: the commit named is no longer what `main` would ship.
+name: release-publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Full 40-character commit SHA to release (must be origin/main tip)'
+        required: true
+        type: string
+      version:
+        description: 'The version that commit ships — typed out, so the commit can disagree'
+        required: true
+        type: string
+      confirm:
+        description: 'dry-run checks and stops; publish checks and creates the tag'
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, publish]
+
+# Nothing by default, granted per job. The alternative -- a workflow-wide block
+# wide enough for the widest job -- hands `contents: write` to the job whose
+# entire value is not having it.
+permissions: {}
+
+# A version ships once, so two runs publishing at once is not a case worth
+# having a policy for. `cancel-in-progress` is deliberately absent: cancelling a
+# run between the tag ref and the release object leaves exactly the half-made
+# state this ordering exists to avoid.
+concurrency:
+  group: release-publish
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+
+    # Read-only, and `actions: read` for the same reason `release.yml` carries
+    # it: check 5 asks whether `checks` concluded success on a SHA, and that is
+    # an Actions API call the default token cannot make.
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      # The named commit, not the dispatch ref. `workflow_dispatch` takes a ref
+      # of the operator's choosing and `github.ref` is whatever branch the run
+      # was launched from -- checking that out would grade one commit and
+      # publish another. `fetch-depth: 0` because `merge-base --is-ancestor` on
+      # a graft point answers a question about the truncation, and because the
+      # already-released check reads `refs/tags/`, which a shallow checkout
+      # leaves empty.
+      #
+      # `inputs.sha` reaches `with:` and never a `run:` body. An action input is
+      # data handed to the action; `${{ }}` inside `run:` is substituted into
+      # shell source before bash parses it, which is a different thing wearing
+      # the same syntax.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+
+      # Load-bearing rather than hygienic: check 4 compares HEAD against
+      # `origin/main`, and falls back to a local `main` when no remote-tracking
+      # ref exists. A stale or absent `origin/main` is what makes a stale HEAD
+      # look current, which is the failure the comparison is standing in front
+      # of.
+      - name: Fetch main
+        run: git fetch --no-tags origin +main:refs/remotes/origin/main
+
+      # `--dry-run` runs every check, including the gate, and makes no call that
+      # writes. The operator's two inputs arrive as environment variables and
+      # are expanded quoted inside the script, so what the dispatcher typed
+      # stays data.
+      - name: Release check and dry run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash scripts/publish-release.sh --dry-run
+
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    needs: validate
+    if: inputs.confirm == 'publish'
+
+    # The approval gate, and the only part of this file that is inert until
+    # somebody configures it. An environment with no protection rules is created
+    # on first use and approves instantly; adding required reviewers to it is
+    # what turns `publish` into something a second person agrees to. That is a
+    # settings change, not a commit -- see AGENTS.md.
+    environment: release
+
+    # `contents: write` creates the tag object, the ref, and the release, and
+    # buys nothing else here. It is the one grant over `validate`, and it is why
+    # `validate` is a separate job.
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch --no-tags origin +main:refs/remotes/origin/main
+
+      # The identity the ruleset will name. `GITHUB_TOKEN` is a GitHub App
+      # installation token, but whether the Actions app can be granted ruleset
+      # bypass is not documented either way, so this does not depend on it: set
+      # the `RELEASE_BOT_APP_ID` variable and the matching secret, and the
+      # publish runs as an App that can be named in a bypass list. Leave them
+      # unset and it runs as `github.token`, which is correct until the ruleset
+      # is active and cannot be after.
+      #
+      # `secrets.RELEASE_BOT_PRIVATE_KEY` is an *environment* secret on
+      # `release`, not a repository secret, and the difference is the whole
+      # defence described in the header: a repository secret is readable by a
+      # workflow on any ref, so a branch carrying an edited copy of this file
+      # could mint the same token. An environment secret is reachable only from
+      # a job that names the environment, and only from a ref that environment
+      # allows.
+      #
+      # One documented consequence either way, worth knowing rather than
+      # discovering: a tag pushed with `GITHUB_TOKEN` does not trigger workflows
+      # that run on `push`, so `release.yml` stays silent for it. An App token
+      # is not suppressed that way, so with the App configured the tag this
+      # workflow creates is also audited by `release.yml` on arrival -- a second
+      # verdict, from the path that grades a tag rather than a commit.
+      - name: Mint the publishing identity
+        id: app-token
+        if: vars.RELEASE_BOT_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      # The same script, the same checks, the same commit — in the mode that
+      # writes. Everything `validate` proved is proved again here, because the
+      # approval in between is exactly when it could have stopped being true.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          RELEASE_SHA: ${{ inputs.sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash scripts/publish-release.sh --publish
