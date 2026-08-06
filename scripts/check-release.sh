@@ -22,7 +22,8 @@
 #                  HEAD`, always, and no tag is ever resolved. This is the
 #                  pre-flight -- it answers "is `main` releasable right now?"
 #   explicit-tag   a tag name. The subject is the commit that tag points at,
-#                  which is the thing an installer actually receives.
+#                  which is the thing an installer actually receives. A tag
+#                  with no ref here is refused rather than stood in for.
 #
 # They were one path, and the seam leaked. The no-tag form derived a tag name
 # from the manifests and then resolved it, so from the moment
@@ -35,6 +36,14 @@
 # So HEAD mode resolves nothing, and it fails when the version it would release
 # is already tagged at another commit, because a version ships once and the
 # repair for that is a bump rather than a retag.
+#
+# The seam leaked the other way too. Explicit-tag mode fell back to HEAD when
+# the named tag had no ref here, so `git clone --no-tags` was the whole
+# reproduction: the tag is published, the clone never fetched it, and the gate
+# printed "release <tag> at <HEAD>" and passed. Somebody checking a release that
+# had already shipped was told it was fine, about a commit that was not it. That
+# fallback served "I am about to cut this tag", which `--head` now serves by
+# saying so, so the tag branch refuses instead. See it for what exit 2 buys.
 #
 # Five checks, in the order that gives the most useful failure first:
 #
@@ -74,10 +83,11 @@
 # checks, fixes landed afterwards, and the gate blessing the state before them.
 #
 # So a run grading HEAD requires the tip, and a run grading a resolved tag keeps
-# ancestry. That line is drawn on the commit rather than on the mode, because
-# they part company in the `no local tag` fallback below: the mode there is
-# explicit-tag, the subject is HEAD, and it is somebody about to cut a tag from
-# whatever they have checked out -- which is the 0.4.0 hand exactly.
+# ancestry. That line used to be drawn on the commit rather than on the mode,
+# because a third branch parted them: a named tag with no ref here fell back to
+# HEAD, so the mode was explicit-tag while the subject was HEAD. That branch is
+# gone -- see it below for why -- and with it the only case where the two
+# disagreed, so the mode decides again.
 #
 # All five grade the same commit, which took a fix of its own. Checks 1-3 read
 # the files on disk while 4 and 5 read `$SHA`, and nothing tied the two
@@ -195,33 +205,41 @@ parse_tag() {
 # branch below used to run in both modes, so a tag that already existed silently
 # took HEAD's place while the banner said "checking HEAD".
 #
-# `SUBJECT_IS_HEAD` is tracked apart from `$HEAD_MODE` because the two come
-# apart in the last branch, and check 4 needs the one they disagree on. The mode
-# there is still explicit-tag -- check 2 grades the named tag's version against
-# the manifests, which is a real question with a real answer -- but there is no
-# tag to resolve, so the commit graded is HEAD. Check 4 keys off the commit.
-#
-# It starts strict and one branch opts out, rather than each branch declaring
-# itself: a fourth branch added later and left undeclared gets the tip test,
-# which is the answer that refuses a release rather than the one that waves it
-# through.
-SUBJECT_IS_HEAD=1
+# There were three branches here and the third is gone, which is why the mode
+# alone decides the subject again. It used to fall back to HEAD when the named
+# tag had no ref, so the mode and the commit came apart and `SUBJECT_IS_HEAD`
+# existed to carry the difference to check 4. Nothing parts them now.
 if [ "$HEAD_MODE" -eq 1 ]; then
   SHA="$(git rev-parse HEAD)"
 # An annotated tag's own object is not the commit it points at, and `git
 # rev-list -n 1` resolves through to the commit either way.
 elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   SHA="$(git rev-list -n 1 "$TAG")"
-  SUBJECT_IS_HEAD=0
 else
-  # A named tag with no local ref is usually somebody checking a release they
-  # are about to cut, so this falls back to HEAD rather than refusing. "No such
-  # ref here" is all it can honestly claim, though: a clone that never fetched
-  # tags looks exactly like a tag that was never made, and this branch cannot
-  # tell them apart. Saying "does not exist" would assert the one it prefers.
-  SHA="$(git rev-parse HEAD)"
-  echo "no local tag $TAG; checking HEAD ($(git rev-parse --short "$SHA"))"
-  echo
+  # A tag this repository cannot resolve is not a subject, and a gate with no
+  # subject has nothing to grade. This used to fall back to HEAD, on the theory
+  # that naming a tag with no ref means "I am about to cut this" -- but `--head`
+  # asks that outright now, and the fallback's price was a verdict about HEAD
+  # printed under the tag's name, in a clone where the tag was published all
+  # along. The message was honest by then; the answer still was not.
+  #
+  # Exit 2, the same code as a tag that does not parse, because it is the same
+  # kind of answer: this input did not resolve to a commit, so no check ran and
+  # there is no verdict either way. Exit 1 would claim the release failed one.
+  #
+  # Both readings are named because this branch still cannot tell them apart --
+  # and `git ls-remote` would reword that rather than settle it. Even knowing
+  # the tag is published at some SHA, checks 4 and 5 need that commit *here*:
+  # `merge-base --is-ancestor` against an object this clone lacks is a fatal,
+  # not a verdict. The answer would still be "fetch it and ask again", bought
+  # with a network call on the one path that needs none.
+  echo "cannot resolve $TAG in this repository" >&2
+  echo "no ref refs/tags/$TAG — and this cannot tell a tag that was never made" >&2
+  echo "from one this clone never fetched (git clone --no-tags, --depth 1 and" >&2
+  echo "actions/checkout's default all leave refs/tags/ empty)." >&2
+  echo "  git fetch --tags origin        # then ask again" >&2
+  echo "  bash scripts/check-release.sh --head   # or grade HEAD, before tagging" >&2
+  exit 2
 fi
 
 # ------------------------------------------------------- the graded checkout
@@ -395,7 +413,7 @@ done
 if [ -z "$MAIN" ]; then
   note FAIL "no main ref to check against — fetch it first (git fetch origin main)"
   fail=1
-elif [ "$SUBJECT_IS_HEAD" -eq 1 ]; then
+elif [ "$HEAD_MODE" -eq 1 ]; then
   MAIN_SHA="$(git rev-parse "$MAIN")"
   if [ "$SHA" = "$MAIN_SHA" ]; then
     note ok "HEAD is $MAIN"
