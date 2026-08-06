@@ -667,6 +667,81 @@ else
   note ok "$DIRTY_TAG — committed and tagged, the same version passes"
 fi
 
+# ------------------------------ the same divergence, once it is committed
+# The section above puts the tree and the commit at odds by leaving an edit
+# uncommitted, which is one way to get there and the loud one — the gate prints
+# a notice about it. The quiet way is ordinary history: a tag is published, work
+# continues, `main`'s manifests move to the next version, and from then on every
+# clean checkout of `main` disagrees with every tag behind it. Nothing is dirty
+# and nothing is wrong.
+#
+# Read from the tree, check 2 turns that into a false negative about a release
+# that is fine. Measured on this repository before e9928fc, with the manifests
+# bumped to 0.4.2: `bash scripts/check-release.sh dovetail--v0.4.1` reported
+# `tag says 0.4.1, manifests say 0.4.2` and exited 1 — about `313b9e4`, whose
+# own manifests say 0.4.1 and always did. Same family as the two sections above,
+# a verdict about one commit printed under another commit's name, inverted: the
+# gate refusing what it should pass rather than passing what it should refuse.
+#
+# It is the reachable half of that bug, too. The uncommitted case needs somebody
+# mid-edit; this one needs only a clone that fetched, and
+# `bash scripts/check-release.sh <tag>` from a working clone is the documented
+# way to verify a published release (AGENTS.md, "Releasing").
+#
+# No new fixture state: the control just above committed the 9.9.9 bump and left
+# `main`, `origin/main` and the checkout sitting on it, which is that moved-on
+# clone exactly. All this adds is the older tag back, deleted by the untagged
+# control further up.
+#
+# Check 2 is the whole of what discriminates here, and that is not a gap in the
+# case. Check 1 sees a self-consistent set of manifests whichever commit it
+# reads them from, and RELEASE-NOTES.md is append-only — the tree's copy is a
+# superset of the tag's, so reading the tree can only ever be too generous for
+# check 3, never too strict.
+echo
+echo "behaviour — a published tag verified from a checkout that moved on"
+
+# This block's canary. If the control's commit had picked nothing up, the
+# checkout would still carry $COMMITTED_VERSION and the run below would pass by
+# agreeing with the tag rather than by reading the tag's commit.
+HEAD_VERSION="$(git -C "$FIXTURE" show "HEAD:.claude-plugin/plugin.json" \
+  | "$PYJSON" -c 'import json,sys;print(json.load(sys.stdin)["version"])')"
+
+if [ "$HEAD_VERSION" = "$DIRTY_VERSION" ] && [ "$HEAD_VERSION" != "$COMMITTED_VERSION" ]; then
+  note ok "fixture: the checkout carries $HEAD_VERSION, $FIXTURE_TAG's commit carries $COMMITTED_VERSION"
+else
+  note FAIL "fixture: the checkout carries $HEAD_VERSION — nothing below tells the two apart"
+  fail=1
+fi
+
+git -C "$FIXTURE" tag "$FIXTURE_TAG" "$RELEASED"
+
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$FIXTURE_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $FIXTURE_TAG at $RELEASED_SHORT"; then
+  note FAIL "$FIXTURE_TAG — did not grade the tagged commit ($RELEASED_SHORT)"
+  fail=1
+elif printf '%s\n' "$out" | grep -qF "tag says $COMMITTED_VERSION"; then
+  # The symptom itself, in whichever wording check 2 fails in. Reading the
+  # checkout again lands here rather than only on the exit code below.
+  note FAIL "$FIXTURE_TAG — the version check read the checkout's $HEAD_VERSION"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "the commit's manifests carry $COMMITTED_VERSION"; then
+  note FAIL "$FIXTURE_TAG — did not read $COMMITTED_VERSION out of $RELEASED_SHORT"
+  fail=1
+elif printf '%s\n' "$out" | grep -qF "uncommitted changes present"; then
+  # Separates this from the section above: the divergence here is history, and
+  # a notice claiming an unclean tree would send the reader to `git status` to
+  # find nothing.
+  note FAIL "$FIXTURE_TAG — the checkout is clean and the run said otherwise"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "$FIXTURE_TAG — exit $rc, expected 0 ($RELEASED_SHORT is a valid release)"
+  fail=1
+else
+  note ok "$FIXTURE_TAG — $RELEASED_SHORT still passes from a checkout carrying $HEAD_VERSION"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "Release-check tests passed." || echo "Release-check tests FAILED."
 exit "$fail"
