@@ -1,0 +1,54 @@
+# The check `checks.yml` structurally cannot do.
+#
+# `checks.yml` runs on pushes and pull requests, so it validates commits. It
+# says nothing about tags, and a tag is a pointer -- it can be moved, or created
+# from anywhere, including a commit that never saw CI. At 0.4.0 that gap was not
+# hypothetical: the tag stayed where it was while four green commits landed on
+# `main` behind it, and the published release kept shipping the state before
+# them for as long as nobody noticed.
+#
+# So this runs on the tag itself and asks whether `checks` already concluded
+# success on that exact SHA -- which is a question only something triggered by
+# the tag can ask.
+#
+# `workflow_dispatch` runs the same script against HEAD, which answers "is main
+# releasable right now?" before anybody tags anything.
+name: release
+
+on:
+  push:
+    tags: ['dovetail--v*']
+  workflow_dispatch:
+
+# `actions: read` is the one addition over checks.yml: reading whether a run
+# succeeded on a SHA is an Actions API call, and the default token cannot make
+# it without this.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  release-check:
+    name: release check
+    runs-on: ubuntu-latest
+
+    steps:
+      # fetch-depth: 0 because the default is a one-commit shallow clone, and
+      # `git merge-base --is-ancestor` on a graft point answers a question about
+      # the truncation rather than about the history.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Belt and braces: the ancestry check needs `origin/main` to exist, and
+      # which remote-tracking refs a tag build ends up with is not the thing to
+      # bet a release gate on. Idempotent, and free once the objects are local.
+      - name: Fetch main
+        run: git fetch --no-tags origin +main:refs/remotes/origin/main
+
+      - name: Release check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          bash scripts/check-release.sh --strict
+          ${{ github.ref_type == 'tag' && github.ref_name || '' }}

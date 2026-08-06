@@ -1,7 +1,7 @@
 {
   "name": "dovetail",
   "displayName": "Dovetail",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Eight Claude Code skills that hold together by shape: author prompts without contaminating them, compose isolated sub-agents and judge panels, verify the result in a clean room without fooling yourself, and close the session so the next one starts from what actually happened.",
   "author": {
     "name": "OpenCnid Labs",
