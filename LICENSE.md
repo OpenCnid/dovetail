@@ -8,9 +8,18 @@ https://creativecommons.org/licenses/by/4.0/
 
 ## What this license does not cover
 
-This repository contains **no skill text of its own**. Every skill is a git
-submodule pinned to its own repository, and each carries its own license there.
-Nothing in this file relicenses any of them.
+**The skills under `skills/` carry their own licenses**, each in its own
+directory, and nothing in this file relicenses any of them. That placement is
+deliberate rather than tidy: `scripts/install.sh` copies a skill directory and
+nothing above it, so a skill leaning on this file would ship with no license at
+all. Check the license in the directory you are actually using — they are not
+all the same. `better-skill-creator` is Apache-2.0 and carries a `NOTICE`
+beside it that travels with the skill.
+
+Until `0.3.0` this section said the repository contained no skill text of its
+own, because every skill was then a git submodule pinned to its own repository.
+That stopped being true when the skills moved in here. `docs/provenance.md`
+records where each one came from and the commit it arrived at.
 
 The **prompt-engineering toolkit and the hypershot technique** are the work of
 Matthew Murphy (https://github.com/gusthemole), published as the Lexideck prompt
