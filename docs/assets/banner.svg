@@ -1,0 +1,155 @@
+<svg viewBox="0 0 880 636" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dovetail, in three tiers. Tier one, what each one gives you: prompt-engineering, it follows what you meant; hypershot-protocol, the shape and never the answer; subagent-composition, a team of you running at once; judge-composition, a court for your own work; self-play, it plays itself to find the move; better-skill-creator, teach it once then prove it; upsum, a memory that never swamps; spark-steering, name the gap before the fix. Tier two, what a group unlocks that no member can: the gate, prompt-engineering plus hypershot-protocol, so no expectation reaches the page, carried in two descriptions, three bodies and the house rule; the clean room, self-play plus subagent-composition plus judge-composition, so a score your wish cannot reach, self-play importing both by name; and what outlives the session, better-skill-creator with the two you type, drawn dashed because it is shared purpose with no import in either direction. Tier three, the eight cut as through dovetails into a corner joint drawn in three dimensions, the tails coloured in runs of two, three and three by their group: each one stands alone, and the pack is an argument about how they fit, not a measured result.">
+  <defs>
+    <linearGradient id="ramp" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="50%" stop-color="#9b8cf7"/>
+      <stop offset="100%" stop-color="#ef6fd0"/>
+    </linearGradient>
+    <marker id="tipb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="tipp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef6fd0"/>
+    </marker>
+    <marker id="tipg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2ea44f"/>
+    </marker>
+  </defs>
+
+  <text x="440" y="46" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="34" font-weight="700" fill="url(#ramp)">dovetail</text>
+  <text x="440" y="74" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="12.5" fill="#8b949e">eight skills that make Claude Code better at checking its own work</text>
+
+  <!-- ============ I. what each one gives you ============ -->
+  <text x="40" y="112" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#8b949e" letter-spacing="1.5">I &#183; WHAT EACH ONE GIVES YOU</text>
+  <line x1="286" y1="108" x2="840" y2="108" stroke="#8b949e" stroke-opacity="0.25" stroke-width="1"/>
+
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5">
+    <text x="40" y="140" fill="#58a6ff">prompt-engineering</text>
+    <text x="240" y="140" fill="#58a6ff">hypershot-protocol</text>
+    <text x="440" y="140" fill="#ef6fd0">subagent-composition</text>
+    <text x="640" y="140" fill="#ef6fd0">judge-composition</text>
+
+    <text x="40" y="186" fill="#ef6fd0">self-play</text>
+    <text x="240" y="186" fill="#2ea44f">better-skill-creator</text>
+    <text x="440" y="186" fill="#2ea44f">/upsum</text>
+    <text x="640" y="186" fill="#2ea44f">/spark-steering</text>
+  </g>
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10" fill="#8b949e">
+    <text x="40" y="156">it follows what you meant</text>
+    <text x="240" y="156">the shape, never the answer</text>
+    <text x="440" y="156">a team of you, running at once</text>
+    <text x="640" y="156">a court for your own work</text>
+
+    <text x="40" y="202">plays itself to find the move</text>
+    <text x="240" y="202">teach it once, then prove it</text>
+    <text x="440" y="202">a memory that never swamps</text>
+    <text x="640" y="202">name the gap before the fix</text>
+  </g>
+
+  <!-- ============ II. what a group unlocks that no member can ============ -->
+  <text x="40" y="238" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#8b949e" letter-spacing="1.5">II &#183; WHAT A GROUP UNLOCKS THAT NO MEMBER CAN</text>
+  <line x1="424" y1="234" x2="840" y2="234" stroke="#8b949e" stroke-opacity="0.25" stroke-width="1"/>
+
+  <rect x="40" y="252" width="260" height="156" rx="10" fill="#58a6ff" fill-opacity="0.05" stroke="#58a6ff" stroke-opacity="0.5"/>
+  <rect x="310" y="252" width="260" height="156" rx="10" fill="#ef6fd0" fill-opacity="0.05" stroke="#ef6fd0" stroke-opacity="0.5"/>
+  <rect x="580" y="252" width="260" height="156" rx="10" fill="#2ea44f" fill-opacity="0.05" stroke="#2ea44f" stroke-opacity="0.5" stroke-dasharray="5 4"/>
+
+  <g text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" letter-spacing="1.4">
+    <text x="170" y="276" fill="#58a6ff">THE GATE</text>
+    <text x="440" y="276" fill="#ef6fd0">THE CLEAN ROOM</text>
+    <text x="710" y="276" fill="#2ea44f">WHAT OUTLIVES THE SESSION</text>
+  </g>
+
+  <g text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5">
+    <text x="170" y="298" fill="#58a6ff">prompt-engineering</text>
+    <text x="170" y="314" fill="#58a6ff">hypershot-protocol</text>
+
+    <text x="440" y="298" fill="#ef6fd0">self-play</text>
+    <text x="440" y="314" fill="#ef6fd0">subagent-composition</text>
+    <text x="440" y="330" fill="#ef6fd0">judge-composition</text>
+
+    <text x="710" y="298" fill="#2ea44f">better-skill-creator</text>
+    <text x="710" y="314" fill="#2ea44f">/upsum</text>
+    <text x="710" y="330" fill="#2ea44f">/spark-steering</text>
+  </g>
+
+  <g stroke-width="1.5">
+    <line x1="170" y1="340" x2="170" y2="354" stroke="#58a6ff" marker-end="url(#tipb)"/>
+    <line x1="440" y1="340" x2="440" y2="354" stroke="#ef6fd0" marker-end="url(#tipp)"/>
+    <line x1="710" y1="340" x2="710" y2="354" stroke="#2ea44f" marker-end="url(#tipg)"/>
+  </g>
+
+  <rect x="67" y="361" width="206" height="22" rx="6" fill="#58a6ff" fill-opacity="0.12"/>
+  <rect x="340" y="361" width="200" height="22" rx="6" fill="#ef6fd0" fill-opacity="0.12"/>
+  <rect x="607" y="361" width="206" height="22" rx="6" fill="#2ea44f" fill-opacity="0.12"/>
+  <g text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10">
+    <text x="170" y="376" fill="#58a6ff">no expectation reaches the page</text>
+    <text x="440" y="376" fill="#ef6fd0">a score your wish cannot reach</text>
+    <text x="710" y="376" fill="#2ea44f">the next session starts from it</text>
+  </g>
+
+  <g text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="9.5" fill="#8b949e">
+    <text x="170" y="397">2 descriptions &#183; 3 bodies &#183; the house rule</text>
+    <text x="440" y="397">self-play imports both by name</text>
+    <text x="710" y="397">shared purpose &#183; no import either way</text>
+  </g>
+
+  <!-- ============ III. what the eight amount to — a through dovetail, in three dimensions ============ -->
+  <text x="40" y="430" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="10.5" fill="#8b949e" letter-spacing="1.5">III &#183; WHAT THE EIGHT AMOUNT TO</text>
+  <line x1="302" y1="426" x2="840" y2="426" stroke="#8b949e" stroke-opacity="0.25" stroke-width="1"/>
+
+  <!-- the mating board, receding: its end grain in shadow -->
+  <path d="M 790 480 L 824 446 L 824 514 L 790 548 Z" fill="#8b949e" fill-opacity="0.30" stroke="#8b949e" stroke-opacity="0.5" stroke-width="1.1"/>
+
+  <!-- the top board, lit: one surface running back, the eight tails cut from its front edge -->
+  <path d="M 40 480 L 790 480 L 824 446 L 74 446 Z" fill="#8b949e" fill-opacity="0.07" stroke="none"/>
+  <g stroke="#8b949e" stroke-opacity="0.5" stroke-width="1.1" fill="none">
+    <path d="M 74 446 L 824 446"/>
+    <path d="M 40 480 L 74 446"/>
+  </g>
+
+  <!-- the front board, in shadow: pins standing between the tails, sockets cut down to take them -->
+  <path d="M 40 480 L 70 480 L 62 528 L 131 528 L 123 480 L 161 480 L 153 528 L 222 528 L 214 480 L 252 480 L 244 528 L 313 528 L 305 480 L 343 480 L 335 528 L 404 528 L 396 480 L 434 480 L 426 528 L 495 528 L 487 480 L 525 480 L 517 528 L 586 528 L 578 480 L 616 480 L 608 528 L 677 528 L 669 480 L 707 480 L 699 528 L 768 528 L 760 480 L 790 480 L 790 548 L 40 548 Z"
+        fill="#8b949e" fill-opacity="0.22" stroke="#8b949e" stroke-opacity="0.5" stroke-width="1.1"/>
+
+  <!-- the eight tails: the top board's own wood, come down into the sockets -->
+  <g fill="#8b949e" fill-opacity="0.07" stroke="none">
+    <path d="M 70 480 L 123 480 L 131 528 L 62 528 Z"/>
+    <path d="M 161 480 L 214 480 L 222 528 L 153 528 Z"/>
+    <path d="M 252 480 L 305 480 L 313 528 L 244 528 Z"/>
+    <path d="M 343 480 L 396 480 L 404 528 L 335 528 Z"/>
+    <path d="M 434 480 L 487 480 L 495 528 L 426 528 Z"/>
+    <path d="M 525 480 L 578 480 L 586 528 L 517 528 Z"/>
+    <path d="M 616 480 L 669 480 L 677 528 L 608 528 Z"/>
+    <path d="M 707 480 L 760 480 L 768 528 L 699 528 Z"/>
+  </g>
+  <g fill-opacity="0.24" stroke="none">
+    <path d="M 70 480 L 123 480 L 131 528 L 62 528 Z" fill="#58a6ff"/>
+    <path d="M 161 480 L 214 480 L 222 528 L 153 528 Z" fill="#58a6ff"/>
+    <path d="M 252 480 L 305 480 L 313 528 L 244 528 Z" fill="#ef6fd0"/>
+    <path d="M 343 480 L 396 480 L 404 528 L 335 528 Z" fill="#ef6fd0"/>
+    <path d="M 434 480 L 487 480 L 495 528 L 426 528 Z" fill="#ef6fd0"/>
+    <path d="M 525 480 L 578 480 L 586 528 L 517 528 Z" fill="#2ea44f"/>
+    <path d="M 616 480 L 669 480 L 677 528 L 608 528 Z" fill="#2ea44f"/>
+    <path d="M 707 480 L 760 480 L 768 528 L 699 528 Z" fill="#2ea44f"/>
+  </g>
+  <g fill="none" stroke-width="1.4" stroke-opacity="0.8">
+    <path d="M 70 480 L 62 528 L 131 528 L 123 480" stroke="#58a6ff"/>
+    <path d="M 161 480 L 153 528 L 222 528 L 214 480" stroke="#58a6ff"/>
+    <path d="M 252 480 L 244 528 L 313 528 L 305 480" stroke="#ef6fd0"/>
+    <path d="M 343 480 L 335 528 L 404 528 L 396 480" stroke="#ef6fd0"/>
+    <path d="M 434 480 L 426 528 L 495 528 L 487 480" stroke="#ef6fd0"/>
+    <path d="M 525 480 L 517 528 L 586 528 L 578 480" stroke="#2ea44f"/>
+    <path d="M 616 480 L 608 528 L 677 528 L 669 480" stroke="#2ea44f"/>
+    <path d="M 707 480 L 699 528 L 768 528 L 760 480" stroke="#2ea44f"/>
+  </g>
+
+  <g text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="9.5">
+    <text x="142" y="566" fill="#58a6ff">the gate</text>
+    <text x="370" y="566" fill="#ef6fd0">the clean room</text>
+    <text x="642" y="566" fill="#2ea44f">what outlives the session</text>
+  </g>
+
+  <text x="440" y="596" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="11" fill="#9b8cf7">each one stands alone; the pack is an argument about how they fit, not a measured result</text>
+  <text x="440" y="618" text-anchor="middle" font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="11" fill="#8b949e">cut to fit &#183; no glue</text>
+</svg>

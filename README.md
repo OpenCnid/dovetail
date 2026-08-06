@@ -1,5 +1,10 @@
 # dovetail
 
+<p align="center">
+  <img src="docs/assets/banner.svg" width="880"
+       alt="The pack in three tiers. First, what each one gives you alone — a team of you running at once, a court for your own work, a model that plays itself to find the move, and so on. Second, what a group unlocks that no member can: the gate, the clean room, and what outlives the session, each labelled with how well it is evidenced. Third, all eight cut as a dovetail joint, coloured in runs of two, three and three by their group.">
+</p>
+
 **Eight skills that make Claude Code better at checking its own work.**
 
 [![license](https://img.shields.io/badge/license-CC_BY_4.0-3b7ddd)](LICENSE.md)
