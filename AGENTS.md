@@ -162,6 +162,22 @@ and cutting it from a stale checkout is how `0.4.0` happened. `release.yml`'s
 `Fetch main` step is load-bearing for the comparison, since a stale
 `origin/main` makes a stale HEAD look current.
 
+**All five grade that commit, and none of them reads the files on disk.** The
+first three used to. `check-release.sh` `cd`s to the repository root, so
+manifest agreement, the version comparison and the notes entry were answered
+from the working tree while ancestry and CI were answered about the resolved
+SHA, and nothing required those to be one commit or the tree to be clean. With
+an uncommitted bump to 0.5.0 on disk and `dovetail--v0.5.0` pointing at a commit
+whose own manifests say 0.4.1 and whose notes have no 0.5.0 entry,
+`bash scripts/check-release.sh --strict dovetail--v0.5.0` printed five `ok`s and
+exited 0 — a tag that says one version and installs another, issued by the gate
+that opens by calling that worse than no tag. The version-bearing files come out
+of the commit through `git show` now, and a run with uncommitted changes says so
+above the checks: that work is not graded, because it does not ship. No CI path
+could reach the bug — a tag push checks the tag out, so there the tree *was* the
+commit — which is how it lasted; the documented local form reached it, and HEAD
+mode reached it from uncommitted edits alone.
+
 `release.yml` picks the mode from `github.event_name`, not from `ref_type`: a
 dispatch launched from a tag ref reports `ref_type: tag` too, so `ref_type`
 cannot tell a dispatch from a push.
@@ -175,10 +191,13 @@ the tag to the script through `env: RELEASE_TAG` and expands it quoted, because
 `${{ }}` inside a `run:` body substitutes into the shell source before bash
 parses it, and a tag name is chosen by whoever pushes the tag.
 `scripts/test-release-check.sh` holds both halves of that in place, pins which
-commit each mode grades and which commits each mode will accept — in a throwaway
-repository it builds with a tag and a later commit on `main`, so the two answers
-are different commits and the tagged one is an ancestor HEAD mode must refuse
-while explicit-tag mode must not — and runs in
+commit each mode grades, which commits each mode will accept, and that every one
+of the five checks grades that commit rather than the files on disk — in a
+throwaway repository it builds with a tag, a later commit on `main`, and a
+working tree bumped to a version neither commit carries, so the two answers are
+different commits, the tagged one is an ancestor HEAD mode must refuse while
+explicit-tag mode must not, and each remaining wrong answer is a different
+version — and runs in
 `checks`; if you add a workflow, it will also tell you if a `run:` body reads an
 attacker-nameable context.
 

@@ -79,6 +79,18 @@
 # explicit-tag, the subject is HEAD, and it is somebody about to cut a tag from
 # whatever they have checked out -- which is the 0.4.0 hand exactly.
 #
+# All five grade the same commit, which took a fix of its own. Checks 1-3 read
+# the files on disk while 4 and 5 read `$SHA`, and nothing tied the two
+# together: the `cd "$ROOT"` below fixes the working tree as the subject of the
+# first three, so an explicit tag was graded for ancestry and CI on its own
+# commit and for version and notes on whatever was checked out. With the
+# tree bumped to 0.5.0 and uncommitted, and `dovetail--v0.5.0` pointing at a
+# commit whose manifests say 0.4.1 and whose notes have no 0.5.0 entry, all five
+# printed `ok`. That is check 2's own "a tag that says 0.4.1 and installs 0.4.0",
+# issued by the gate that exists to refuse it. So the version-bearing files come
+# out of the commit now, through `git show`, and uncommitted work is reported
+# rather than graded -- an installer never receives it.
+#
 # Before any of them, the tag has to be a tag this pack could have issued:
 # `<plugin>--v<major>.<minor>.<patch>`, optionally `-<prerelease>`. Anything
 # else exits 2 without reading a manifest or touching git. See the block above
@@ -133,17 +145,13 @@ if [ -z "$TAG" ]; then
   HEAD_MODE=1
 fi
 
+# The pack's own name, and the one thing here read from the checkout rather than
+# from the commit under test. It is what makes `dovetail--v0.4.1` a tag *this*
+# pack could have issued -- a question about the convention this script enforces,
+# not about any one commit -- and parsing the tag needs it before there is a
+# resolved commit to read it from. The version goes the other way: it is a
+# property of the commit, and it is read there, further down.
 PLUGIN="$("$PY" -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["name"])')"
-MANIFEST_VERSION="$("$PY" -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
-
-# HEAD mode still needs a tag *name* -- checks 2 and 3 grade a version string,
-# and the version HEAD would ship is the one the manifests carry. Naming it is
-# not the same as resolving it, and below, HEAD mode does not resolve it.
-if [ "$HEAD_MODE" -eq 1 ]; then
-  TAG="${PLUGIN}--v${MANIFEST_VERSION}"
-  echo "$ASKED_AS; checking HEAD as $TAG"
-  echo
-fi
 
 # The tag is the one input here that somebody else names, and `git` accepts far
 # more in a ref than this convention does: `dovetail--v9.9.9$(id)` is a legal
@@ -165,18 +173,27 @@ reject_tag() {
   exit 2
 }
 
-case "$TAG" in
-  *[!A-Za-z0-9.-]*) reject_tag "$TAG" ;;
-  "${PLUGIN}--v"*)  VERSION="${TAG#"${PLUGIN}--v"}" ;;
-  *)                reject_tag "$TAG" ;;
-esac
+# Sets `$VERSION` from `$TAG`, or exits 2. The two modes reach it from opposite
+# directions: explicit-tag mode before the name has been anywhere near git, HEAD
+# mode after it has built the name out of the commit's own manifests -- where a
+# version that cannot be a version means a stale or hand-edited manifest rather
+# than a hostile push, and refusing is still the answer.
+parse_tag() {
+  case "$TAG" in
+    *[!A-Za-z0-9.-]*) reject_tag "$TAG" ;;
+    "${PLUGIN}--v"*)  VERSION="${TAG#"${PLUGIN}--v"}" ;;
+    *)                reject_tag "$TAG" ;;
+  esac
 
-[[ "$VERSION" =~ $VERSION_RE ]] || reject_tag "$TAG"
+  [[ "$VERSION" =~ $VERSION_RE ]] || reject_tag "$TAG"
+}
+
+[ "$HEAD_MODE" -eq 1 ] || parse_tag
 
 # The mode decides the subject, and HEAD mode decides it without consulting
 # `refs/tags/` at all. That unconditional `git rev-parse HEAD` is the fix: the
 # branch below used to run in both modes, so a tag that already existed silently
-# took HEAD's place while the banner above still said "checking HEAD".
+# took HEAD's place while the banner said "checking HEAD".
 #
 # `SUBJECT_IS_HEAD` is tracked apart from `$HEAD_MODE` because the two come
 # apart in the last branch, and check 4 needs the one they disagree on. The mode
@@ -207,31 +224,109 @@ else
   echo
 fi
 
+# ------------------------------------------------------- the graded checkout
+# `$SHA` is settled, so from here the files the checks read come out of it. Only
+# the files the checks read: `git archive` of the whole tree exceeds MAX_PATH on
+# Windows -- `skills/better-skill-creator/tests/fixtures/` is the offender, and
+# `checks` runs this on `windows-latest` -- and nothing else here is opened.
+SNAPSHOT="$(mktemp -d)"
+trap 'rm -rf "$SNAPSHOT"' EXIT
+
+# Non-zero when the commit does not carry the path at all. Each caller reports
+# that as its own check failing rather than aborting the run: "this commit has
+# no RELEASE-NOTES.md" is a release-check answer, not a git error.
+snapshot() {
+  mkdir -p "$SNAPSHOT/$(dirname "$1")"
+  git show "$SHA:$1" > "$SNAPSHOT/$1" 2>/dev/null
+}
+
+# The one snapshot failure that is not a check failing. Everything below reads a
+# version, so a commit with no manifest is not an unreleasable commit -- it is
+# not this pack, and there is no verdict to give about it.
+if ! snapshot .claude-plugin/plugin.json ||
+   ! MANIFEST_VERSION="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' \
+       "$SNAPSHOT/.claude-plugin/plugin.json" 2>/dev/null)"; then
+  echo "no readable .claude-plugin/plugin.json at $(git rev-parse --short "$SHA")" >&2
+  echo "this gate grades a commit, and that commit does not carry this pack's manifest" >&2
+  exit 2
+fi
+
+# HEAD mode still needs a tag *name* -- checks 2 and 3 grade a version string,
+# and the version HEAD would ship is the one HEAD's own manifests carry, which
+# is why this waits for the snapshot instead of reading the copy on disk. Naming
+# a tag is not resolving one, and HEAD mode still resolves none.
+if [ "$HEAD_MODE" -eq 1 ]; then
+  TAG="${PLUGIN}--v${MANIFEST_VERSION}"
+  parse_tag
+  echo "$ASKED_AS; checking HEAD as $TAG"
+  echo
+fi
+
 fail=0
 note() { printf '  %-6s %s\n' "$1" "$2"; }
 
 echo "release $TAG at $(git rev-parse --short "$SHA")"
+
+# Uncommitted work is now consulted by nothing, which is right and is invisible:
+# the reader is looking at 0.5.0 in an editor while the gate answers about the
+# 0.4.1 in the commit. Say so, rather than let the two be reconciled by guessing.
+# Untracked files are excluded because they cannot be in the commit either way,
+# and a notice that fires on every scratch file is a notice nobody reads.
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "  (uncommitted changes present — they are not graded below, and do not ship)"
+fi
 echo
 
 # 1 + 2. Manifest agreement is bump-version.sh's job and it already exits
 # non-zero on disagreement; all this adds is that they agree *with the tag*.
-if bash scripts/bump-version.sh --check >/dev/null 2>&1; then
+#
+# The list comes out of the commit, because it describes that commit's
+# manifests. The script that reads the list is copied from the checkout: it is
+# the tool rather than the data, and running a `bash` script out of whichever
+# commit a tag happens to name is a larger promise than this gate needs to make.
+# A commit whose list the current tool cannot read fails as a disagreement,
+# which is the safe direction and says `.version-bump.json is stale` when run
+# by hand.
+snapshot_manifests() {
+  local path
+  snapshot .version-bump.json || return 1
+  mkdir -p "$SNAPSHOT/scripts"
+  cp scripts/bump-version.sh "$SNAPSHOT/scripts/bump-version.sh" || return 1
+  while IFS= read -r path; do
+    # Python's default text mode writes CRLF on Windows -- the same translation
+    # bump-version.sh disables with `newline="\n"` when it writes a manifest.
+    # Command substitution elsewhere in this script hides it by stripping the
+    # trailing `\r\n`; reading line by line does not, and `git show` was being
+    # handed a path ending in a carriage return, failing, and reporting it as
+    # manifests that disagree. Measured 2026-08-06 on git-bash 5.2.37(msys),
+    # where both `python3` (3.12.10) and `python` (3.13.1) translate.
+    snapshot "${path%$'\r'}" || return 1
+  done < <("$PY" -c 'import json,sys;print("\n".join(sorted({e["path"] for e in json.load(open(sys.argv[1]))["files"]})))' \
+    "$SNAPSHOT/.version-bump.json" 2>/dev/null)
+}
+
+if snapshot_manifests && bash "$SNAPSHOT/scripts/bump-version.sh" --check >/dev/null 2>&1; then
   note ok "manifests agree with each other"
 else
-  note FAIL "manifests disagree — run: bash scripts/bump-version.sh --check"
+  # Named with the commit, because the copy on disk is a different file and
+  # `--check` on it may well pass while this one fails -- that gap is the bug
+  # this section was rewritten for.
+  note FAIL "manifests disagree at $(git rev-parse --short "$SHA") — run: bash scripts/bump-version.sh --check"
   fail=1
 fi
 
 if [ "$HEAD_MODE" -eq 1 ]; then
   # Not a check in this mode, and printed as what it is. `$VERSION` was parsed
-  # back out of a tag name this script built from `$MANIFEST_VERSION` twenty
-  # lines up, so the comparison below cannot fail here; an `ok` that cannot go
-  # the other way reads as a check and is not one.
+  # back out of a tag name this script built from `$MANIFEST_VERSION`, so the
+  # comparison below cannot fail here; an `ok` that cannot go the other way
+  # reads as a check and is not one. It holds only because both sides now come
+  # from `$SHA` -- built from the working tree and compared against the commit,
+  # this would have been a real check wearing the words of an empty one.
   note ok "HEAD would ship $VERSION"
 elif [ "$MANIFEST_VERSION" = "$VERSION" ]; then
-  note ok "manifests carry $VERSION"
+  note ok "the commit's manifests carry $VERSION"
 else
-  note FAIL "tag says $VERSION, manifests say $MANIFEST_VERSION"
+  note FAIL "tag says $VERSION, the commit's manifests say $MANIFEST_VERSION"
   fail=1
 fi
 
@@ -269,8 +364,10 @@ if [ "$HEAD_MODE" -eq 1 ]; then
   fi
 fi
 
-# 3. The heading format is `## v0.4.1 (2026-08-05)`.
-if grep -q "^## v${VERSION//./\\.} " RELEASE-NOTES.md; then
+# 3. The heading format is `## v0.4.1 (2026-08-05)`. Read from the commit, where
+# a missing file and a missing entry are the same answer: the release this tag
+# names is undocumented in what it ships.
+if snapshot RELEASE-NOTES.md && grep -q "^## v${VERSION//./\\.} " "$SNAPSHOT/RELEASE-NOTES.md"; then
   note ok "RELEASE-NOTES.md has a v$VERSION entry"
 else
   note FAIL "RELEASE-NOTES.md has no '## v$VERSION' entry"
