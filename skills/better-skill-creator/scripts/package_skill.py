@@ -105,6 +105,16 @@ API_SIZE_LIMIT_BYTES = 30 * 1024 * 1024
 # failure class this rewrite exists to close.
 UPLOAD_TARGETS = frozenset({"claude-ai"})
 
+# A second name policy lives in run_eval.py (SCAFFOLD_EXCLUDED_NAMES), deciding
+# what a probe's working directory holds rather than what a stranger receives
+# from a published archive. It shares roughly twenty names with the tables below
+# and diverges deliberately everywhere else: it matches case-folded, it drops no
+# dot-entry it has not named, and it adopts none of the word or compound rules,
+# because a scaffold entry a query names and cannot find is scored as a failed
+# trigger rather than an error. Edit these tables for what an archive should
+# carry; edit that one for what a probe should see. Neither is the other's
+# source of truth, and widening this one does not widen that one.
+#
 # Dot-entries are excluded as a class. This is the one carve-out: a skills-dir
 # plugin is a documented distributable shape and carries its manifest here.
 DOT_ALLOWLIST = {".claude-plugin"}

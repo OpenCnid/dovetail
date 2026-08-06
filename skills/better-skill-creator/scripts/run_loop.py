@@ -25,6 +25,7 @@ from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.run_eval import (
     add_probe_arguments,
+    check_scaffold,
     check_skill_md_encoding,
     load_eval_set,
     print_eval_stats,
@@ -372,6 +373,17 @@ def run_loop(
         "competing_installed_skills": sorted(
             {s for h in health_by_iteration for s in (h.get("competing_installed_skills") or [])}
         ),
+        # Invariant across iterations — the scaffold is the same tree each time —
+        # but carried here so a reader of the loop's health does not have to
+        # open per_iteration to find out what the probes never saw.
+        "scaffold_exclusions": (
+            next((h["scaffold_exclusions"] for h in health_by_iteration
+                  if h.get("scaffold_exclusions")), [])
+        ),
+        "scaffold_disclosures": (
+            next((h["scaffold_disclosures"] for h in health_by_iteration
+                  if h.get("scaffold_disclosures")), [])
+        ),
         "per_iteration": health_by_iteration,
     }
 
@@ -449,6 +461,8 @@ def main():
 
     check_skill_md_encoding(skill_path)
     name, _, _ = parse_skill_md(skill_path)
+
+    check_scaffold(args.scaffold)
 
     # Both train and test are evaluated every iteration, so the holdout does not
     # reduce the probe count — the whole eval set is priced, every iteration.

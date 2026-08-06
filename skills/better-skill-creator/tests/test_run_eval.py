@@ -41,12 +41,15 @@ from scripts import run_eval as run_eval_mod  # noqa: E402
 from scripts.generate_report import generate_html  # noqa: E402
 from scripts.run_eval import (  # noqa: E402
     EvalSetError,
+    ScaffoldError,
+    check_scaffold,
     check_skill_md_encoding,
     project_spend,
     read_confirmation,
     run_eval,
     run_single_query,
     validate_eval_set,
+    validate_scaffold,
 )
 from scripts.run_loop import split_eval_set  # noqa: E402
 
@@ -997,6 +1000,750 @@ class TestModuleDocumentation(unittest.TestCase):
         for clone in clones:
             self.assertIn(clone, first["slash_commands"])
             self.assertNotIn(clone, first["skills"])
+
+
+def _symlinks_available() -> bool:
+    probe = Path(tempfile.mkdtemp(prefix="scaffold-symlink-probe-"))
+    try:
+        target = probe / "t.txt"
+        target.write_text("x", encoding="utf-8")
+        os.symlink(target, probe / "l.txt")
+        return True
+    except (OSError, NotImplementedError):
+        return False
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+
+def _make_junction(link: Path, target: Path) -> bool:
+    """Create an NTFS directory junction. No elevation required, hence R29a."""
+    if os.name != "nt":
+        return False
+    link.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode == 0 and link.exists()
+
+
+SYMLINKS_AVAILABLE = _symlinks_available()
+
+# Distinct per route, so a byte scan can name which one leaked.
+OUTSIDE_VIA_FILE_LINK = "SCAFFOLD-OUT-OF-TREE-VIA-FILE-LINK-4f1ae2"
+OUTSIDE_VIA_DIR_LINK = "SCAFFOLD-OUT-OF-TREE-VIA-DIR-LINK-9c07bd"
+OUTSIDE_VIA_JUNCTION = "SCAFFOLD-OUT-OF-TREE-VIA-JUNCTION-6b3d10"
+
+
+class TestScaffoldCopySafety(StubHarness):
+    """A --scaffold entry that redirects had its target's *content* copied into
+    the probe root, where the probe subprocess then runs with that root as cwd.
+    shutil.copy2 follows a file link and shutil.copytree defaults to
+    symlinks=False, so all three link forms leaked; the junction leaked past
+    is_symlink(), which answers False for one and needs no elevation to create.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # The sentinel tree lives beside the scaffold, never inside it, so
+        # anything of it that turns up in a probe root arrived through a link.
+        self.outside = self.tmp / "outside"
+        (self.outside / "dirtree" / "deep").mkdir(parents=True)
+        (self.outside / "secret.txt").write_text(OUTSIDE_VIA_FILE_LINK, encoding="utf-8")
+        (self.outside / "dirtree" / "leak.md").write_text(OUTSIDE_VIA_DIR_LINK, encoding="utf-8")
+        (self.outside / "dirtree" / "deep" / "deeper.md").write_text(
+            OUTSIDE_VIA_JUNCTION, encoding="utf-8"
+        )
+
+        self.scaffold = self.tmp / "scaffold"
+        (self.scaffold / "src").mkdir(parents=True)
+        (self.scaffold / "src" / "dedupe.py").write_text("def f(): pass\n", encoding="utf-8")
+        (self.scaffold / "CLAUDE.md").write_text("house rules\n", encoding="utf-8")
+
+    def probe_root(self) -> Path:
+        """A real probe root, torn down the way run_single_query tears one down.
+
+        _release_root also discards the registration, which a bare rmtree would
+        leave behind in _OWNED_ROOTS.
+        """
+        root = run_eval_mod._make_probe_root(str(self.scaffold))
+        self.addCleanup(run_eval_mod._release_root, root)
+        return root
+
+    def refusal(self) -> str:
+        with self.assertRaises(ScaffoldError) as caught:
+            run_eval_mod._make_probe_root(str(self.scaffold))
+        return str(caught.exception)
+
+    # -- the ordinary case still works ------------------------------------
+
+    def test_a_scaffold_of_real_files_is_still_copied(self):
+        root = self.probe_root()
+        self.assertEqual(
+            (root / "src" / "dedupe.py").read_text(encoding="utf-8"), "def f(): pass\n"
+        )
+        self.assertEqual((root / "CLAUDE.md").read_text(encoding="utf-8"), "house rules\n")
+        self.assertTrue((root / ".claude" / "commands").is_dir())
+
+    def test_a_scaffold_of_real_files_excludes_nothing(self):
+        self.assertEqual(validate_scaffold(str(self.scaffold)), [])
+        self.assertEqual(validate_scaffold(None), [])
+
+    def test_an_empty_probe_root_is_unaffected(self):
+        root = run_eval_mod._make_probe_root(None)
+        self.addCleanup(run_eval_mod._release_root, root)
+        self.assertEqual([p.name for p in root.iterdir()], [".claude"])
+
+    # -- every redirect form is refused -----------------------------------
+
+    @unittest.skipUnless(SYMLINKS_AVAILABLE, "symlink creation is unavailable on this machine")
+    def test_a_file_symlink_out_of_the_tree_is_refused(self):
+        os.symlink(self.outside / "secret.txt", self.scaffold / "notes.txt")
+        self.assertIn("symlink", self.refusal())
+
+    @unittest.skipUnless(SYMLINKS_AVAILABLE, "symlink creation is unavailable on this machine")
+    def test_a_directory_symlink_out_of_the_tree_is_refused(self):
+        os.symlink(
+            self.outside / "dirtree", self.scaffold / "shared", target_is_directory=True
+        )
+        self.assertIn("symlink", self.refusal())
+
+    @unittest.skipUnless(SYMLINKS_AVAILABLE, "symlink creation is unavailable on this machine")
+    def test_a_symlink_nested_below_the_top_level_is_refused(self):
+        """copytree dereferences at every depth, so a gate that inspects only
+        src.iterdir()'s children passes `src` as ordinary and leaks underneath
+        it."""
+        os.symlink(self.outside / "secret.txt", self.scaffold / "src" / "vendored.py")
+        self.assertIn("symlink", self.refusal())
+
+    @unittest.skipUnless(SYMLINKS_AVAILABLE, "symlink creation is unavailable on this machine")
+    def test_a_dangling_symlink_is_refused_rather_than_raising_from_the_copy(self):
+        os.symlink(self.outside / "does-not-exist.txt", self.scaffold / "broken.txt")
+        self.assertIn("symlink", self.refusal())
+
+    @unittest.skipIf(os.name != "nt", "NTFS junctions do not exist on this platform")
+    def test_a_directory_junction_is_refused(self):
+        """is_symlink() answers False for a junction and mklink /J needs no
+        elevation, so this is the case a symlink-only gate lets through."""
+        made = _make_junction(self.scaffold / "vendor", self.outside / "dirtree")
+        self.assertTrue(made, "mklink /J failed; the junction case is untested")
+        self.assertFalse(
+            (self.scaffold / "vendor").is_symlink(),
+            "is_symlink() must be False here - that False is the whole defect",
+        )
+        self.assertIn("junction", self.refusal())
+
+    @unittest.skipIf(os.name != "nt", "NTFS junctions do not exist on this platform")
+    def test_a_junction_nested_below_the_top_level_is_refused(self):
+        made = _make_junction(
+            self.scaffold / "src" / "vendor", self.outside / "dirtree" / "deep"
+        )
+        self.assertTrue(made, "mklink /J failed; the nested junction case is untested")
+        self.assertIn("junction", self.refusal())
+
+    @unittest.skipIf(os.name == "nt", "os.mkfifo does not exist on Windows")
+    def test_a_special_file_is_refused(self):
+        os.mkfifo(self.scaffold / "pipe")
+        self.assertIn("special file", self.refusal())
+
+    # -- nothing from outside the tree reaches a probe --------------------
+
+    def test_no_out_of_tree_sentinel_can_reach_a_probe_root(self):
+        """The bytes, not just the entry name. Every link form this machine can
+        build is put in at once, and the scaffold must be refused with none of
+        the sentinel text anywhere under a probe root."""
+        built = []
+        if SYMLINKS_AVAILABLE:
+            os.symlink(self.outside / "secret.txt", self.scaffold / "notes.txt")
+            os.symlink(
+                self.outside / "dirtree", self.scaffold / "shared", target_is_directory=True
+            )
+            os.symlink(self.outside / "secret.txt", self.scaffold / "src" / "vendored.py")
+            built.append("symlink")
+        if _make_junction(self.scaffold / "vendor", self.outside / "dirtree" / "deep"):
+            built.append("junction")
+        self.assertTrue(built, "no link form could be built; this test proved nothing")
+
+        def probe_roots() -> set:
+            return set(
+                Path(tempfile.gettempdir()).glob(f"{run_eval_mod.PROBE_ROOT_PREFIX}*")
+            )
+
+        before = probe_roots()
+        with self.assertRaises(ScaffoldError):
+            run_eval_mod._make_probe_root(str(self.scaffold))
+
+        # Scoped to roots this call created, so the scan cannot be satisfied by
+        # there being nothing to scan, and a future change that validates after
+        # mkdtemp is caught by the bytes rather than by the count alone.
+        sentinels = (OUTSIDE_VIA_FILE_LINK, OUTSIDE_VIA_DIR_LINK, OUTSIDE_VIA_JUNCTION)
+        created = probe_roots() - before
+        for root in sorted(created):
+            self.addCleanup(shutil.rmtree, root, True)
+        for root in sorted(created):
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                body = path.read_text(encoding="utf-8", errors="replace")
+                for sentinel in sentinels:
+                    self.assertNotIn(sentinel, body, f"{sentinel} leaked into {path}")
+        self.assertEqual(created, set(), "a refused scaffold must create no probe root")
+
+    # -- refusing leaves nothing behind -----------------------------------
+
+    def test_a_refused_scaffold_creates_no_probe_root_at_all(self):
+        """Validation runs before mkdtemp deliberately. run_single_query binds
+        probe_root from _make_probe_root's *return*, so a raise after the
+        directory exists leaves it registered and unreleased until exit."""
+        if not SYMLINKS_AVAILABLE and not _make_junction(
+            self.scaffold / "vendor", self.outside / "dirtree"
+        ):
+            self.skipTest("no link form is creatable on this machine")
+        if SYMLINKS_AVAILABLE:
+            os.symlink(self.outside / "secret.txt", self.scaffold / "notes.txt")
+
+        before_owned = set(run_eval_mod._OWNED_ROOTS)
+        before_roots = set(
+            Path(tempfile.gettempdir()).glob(f"{run_eval_mod.PROBE_ROOT_PREFIX}*")
+        )
+
+        with self.assertRaises(ScaffoldError):
+            run_eval_mod._make_probe_root(str(self.scaffold))
+
+        self.assertEqual(set(run_eval_mod._OWNED_ROOTS), before_owned)
+        self.assertEqual(
+            set(Path(tempfile.gettempdir()).glob(f"{run_eval_mod.PROBE_ROOT_PREFIX}*")),
+            before_roots,
+        )
+
+    def test_a_refused_scaffold_is_an_error_record_never_a_non_trigger(self):
+        """The status contract already covers this: any exception raised while
+        setting the probe up is `error`, and an errored probe is never scored."""
+        if SYMLINKS_AVAILABLE:
+            os.symlink(self.outside / "secret.txt", self.scaffold / "notes.txt")
+        elif not _make_junction(self.scaffold / "vendor", self.outside / "dirtree"):
+            self.skipTest("no link form is creatable on this machine")
+
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        record = self.probe(scaffold=str(self.scaffold))
+        self.assertEqual(record["status"], "error", record)
+        self.assertIsNone(record["triggered"])
+        self.assertIn("ScaffoldError", record["error"])
+
+    # -- the scaffold's own .claude/ is out of the copy, so out of the gate
+
+    def test_a_link_inside_the_scaffolds_own_dot_claude_is_not_a_refusal(self):
+        """A top-level .claude/ is skipped by the copy, so refusing on one would
+        reject a scaffold over an entry that never reaches a probe root."""
+        if not SYMLINKS_AVAILABLE:
+            self.skipTest("symlink creation is unavailable on this machine")
+        (self.scaffold / ".claude").mkdir()
+        os.symlink(self.outside / "secret.txt", self.scaffold / ".claude" / "settings.json")
+
+        root = self.probe_root()
+        self.assertFalse((root / ".claude" / "settings.json").exists())
+        self.assertEqual((root / "CLAUDE.md").read_text(encoding="utf-8"), "house rules\n")
+
+    # -- the message, and the pre-spend gate ------------------------------
+
+    def test_the_refusal_names_the_entry_and_where_it_points(self):
+        if not SYMLINKS_AVAILABLE:
+            self.skipTest("symlink creation is unavailable on this machine")
+        os.symlink(self.outside / "secret.txt", self.scaffold / "src" / "vendored.py")
+        message = self.refusal()
+        self.assertIn("vendored.py", message)
+        self.assertIn("secret.txt", message)
+        self.assertIn(str(self.scaffold), message)
+
+    def test_a_missing_scaffold_directory_is_refused_by_name(self):
+        missing = self.tmp / "not-here"
+        with self.assertRaises(ScaffoldError) as caught:
+            validate_scaffold(str(missing))
+        self.assertIn(str(missing), str(caught.exception))
+
+    def test_the_cli_refuses_before_the_spend_projection(self):
+        """A refusal from inside the copy reaches the user as a 100% probe-error
+        rate, after the bill has printed. The CLIs check once, up front."""
+        if not SYMLINKS_AVAILABLE:
+            self.skipTest("symlink creation is unavailable on this machine")
+        os.symlink(self.outside / "secret.txt", self.scaffold / "notes.txt")
+
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as caught:
+                check_scaffold(str(self.scaffold))
+        self.assertEqual(caught.exception.code, 1)
+        printed = err.getvalue()
+        self.assertIn("Error:", printed)
+        self.assertIn("Fix:", printed)
+        self.assertIn("notes.txt", printed)
+
+    def test_the_cli_gate_passes_a_scaffold_of_real_files(self):
+        self.assertIsNone(check_scaffold(str(self.scaffold)))
+        self.assertIsNone(check_scaffold(None))
+
+
+OUTSIDE_VIA_DOTENV = "SCAFFOLD-SECRET-IN-DOTENV-1a72fe"
+OUTSIDE_VIA_GIT_CONFIG = "SCAFFOLD-SECRET-IN-GIT-CONFIG-5e40cb"
+
+
+class TestScaffoldExclusions(StubHarness):
+    """`.claude` was the copy loop's only exclusion, so a scaffold's own `.env`
+    and `.git/config` -- the latter carrying a credentialed remote URL -- were
+    copied into every probe workspace verbatim. No link is involved, so the
+    reparse gate cannot see either one.
+
+    The list stays short deliberately. A query naming an absent path burns the
+    --max-tools budget and is recorded `no_trigger`, which is scored, so an
+    over-eager exclusion moves the recall number instead of protecting it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.scaffold = self.tmp / "scaffold"
+        (self.scaffold / "src").mkdir(parents=True)
+        (self.scaffold / "src" / "dedupe.py").write_text("def f(): pass\n", encoding="utf-8")
+        (self.scaffold / "CLAUDE.md").write_text("house rules\n", encoding="utf-8")
+
+    def probe_root(self) -> Path:
+        root = run_eval_mod._make_probe_root(str(self.scaffold))
+        self.addCleanup(run_eval_mod._release_root, root)
+        return root
+
+    def bodies(self, root: Path) -> str:
+        return "\n".join(
+            p.read_text(encoding="utf-8", errors="replace")
+            for p in root.rglob("*")
+            if p.is_file()
+        )
+
+    def excluded_paths(self) -> list:
+        return [path for path, _ in validate_scaffold(str(self.scaffold))]
+
+    # -- the two routes actually reported ---------------------------------
+
+    def test_a_dotenv_never_reaches_a_probe_root(self):
+        (self.scaffold / ".env").write_text(
+            f"API_TOKEN={OUTSIDE_VIA_DOTENV}\n", encoding="utf-8"
+        )
+        root = self.probe_root()
+        self.assertFalse((root / ".env").exists())
+        self.assertNotIn(OUTSIDE_VIA_DOTENV, self.bodies(root))
+
+    def test_a_git_directory_never_reaches_a_probe_root(self):
+        (self.scaffold / ".git").mkdir()
+        (self.scaffold / ".git" / "config").write_text(
+            f"[remote \"origin\"]\n\turl = https://x:{OUTSIDE_VIA_GIT_CONFIG}@example.invalid/r.git\n",
+            encoding="utf-8",
+        )
+        root = self.probe_root()
+        self.assertFalse((root / ".git").exists())
+        self.assertNotIn(OUTSIDE_VIA_GIT_CONFIG, self.bodies(root))
+
+    def test_a_git_worktree_pointer_file_never_reaches_a_probe_root(self):
+        """In a `git worktree` checkout .git is a file holding an absolute
+        gitdir: pointer. Copied, it makes the probe root a live and writable
+        checkout of the user's real repository, and there is no link for the
+        reparse gate to catch -- only the name."""
+        (self.scaffold / ".git").write_text(
+            "gitdir: D:/real-repo/.git/worktrees/checkout\n", encoding="utf-8"
+        )
+        root = self.probe_root()
+        self.assertFalse((root / ".git").exists())
+        self.assertIn(".git", self.excluded_paths())
+
+    # -- depth and case ---------------------------------------------------
+
+    def test_an_excluded_directory_nested_below_the_top_level_is_dropped(self):
+        (self.scaffold / "src" / "__pycache__").mkdir()
+        (self.scaffold / "src" / "__pycache__" / "dedupe.pyc").write_text(
+            "bytecode\n", encoding="utf-8"
+        )
+        root = self.probe_root()
+        self.assertTrue((root / "src" / "dedupe.py").exists())
+        self.assertFalse((root / "src" / "__pycache__").exists())
+
+    def test_a_nested_dotenv_is_dropped(self):
+        (self.scaffold / "src" / ".env.local").write_text(
+            f"K={OUTSIDE_VIA_DOTENV}\n", encoding="utf-8"
+        )
+        root = self.probe_root()
+        self.assertNotIn(OUTSIDE_VIA_DOTENV, self.bodies(root))
+
+    def test_exclusion_is_case_folded(self):
+        """`.GIT` and `__PYCACHE__` name the same entries as their lowercase
+        spellings on Windows and macOS. package_skill.py's exact-name tables are
+        case-sensitive and miss exactly this."""
+        self.assertIsNotNone(run_eval_mod._scaffold_exclusion(".GIT"))
+        self.assertIsNotNone(run_eval_mod._scaffold_exclusion("__PYCACHE__"))
+        self.assertIsNotNone(run_eval_mod._scaffold_exclusion("Production.ENV"))
+
+    def test_a_nested_dot_claude_is_excluded_too(self):
+        """This reverses the earlier top-level-only contract, and the reason is
+        `.claude/skills/`: references/how-skills-load.md records that a skill at
+        `apps/web/.claude/skills/deploy` registers as `apps/web:deploy`, so a
+        scaffold carrying one puts a competing skill in the probe's own session.
+        Nested `settings.json` appears not to be read -- the shipped CLI names
+        four settings sources and no directory-scoped variant -- so the skills
+        path is the evidenced one."""
+        (self.scaffold / "src" / ".claude" / "skills" / "deploy").mkdir(parents=True)
+        (self.scaffold / "src" / ".claude" / "skills" / "deploy" / "SKILL.md").write_text(
+            "---\nname: deploy\n---\n", encoding="utf-8"
+        )
+        root = self.probe_root()
+        self.assertFalse((root / "src" / ".claude").exists())
+        self.assertTrue((root / "src" / "dedupe.py").exists())
+
+    def test_the_dot_claude_exclusion_is_depth_independent(self):
+        for name in (".claude", ".CLAUDE"):
+            with self.subTest(name=name):
+                self.assertIsNotNone(run_eval_mod._scaffold_exclusion(name))
+
+    def test_names_sharing_the_dot_claude_prefix_survive(self):
+        """`.claude-plugin` is a documented distributable shape and `CLAUDE.md`
+        is deliberately copied as scaffold realism, so the rule is exact-name."""
+        for name in (".claude-plugin", ".claudeignore", "CLAUDE.md", "claude_helpers.py"):
+            with self.subTest(name=name):
+                self.assertIsNone(run_eval_mod._scaffold_exclusion(name))
+
+    def test_posix_environment_directories_are_excluded(self):
+        """A POSIX venv symlinks bin/python, so an unexcluded environment
+        directory refuses the whole run on Linux and macOS while passing on
+        Windows. Bare `env` stays copyable -- it is more often content."""
+        for name in (".tox", ".nox", ".direnv", ".conda", "virtualenv"):
+            with self.subTest(name=name):
+                self.assertIsNotNone(run_eval_mod._scaffold_exclusion(name))
+        self.assertIsNone(run_eval_mod._scaffold_exclusion("env"))
+
+    # -- over-exclusion is the failure mode this guards against -----------
+
+    def test_names_a_query_could_resolve_are_not_excluded(self):
+        """Every one of these is dropped by package_skill.py's policy, which is
+        why that policy is not adopted here. A query naming any of them would be
+        scored a non-trigger with no error record to explain it."""
+        keep = [
+            # package_skill.py's SENSITIVE_WORDS / SENSITIVE_COMPOUNDS
+            "tokens.md", "token-limits.md", "counting-tokens.py",
+            "api-key-reference.md", "password_policy.md", "secrets.yaml",
+            "credentials.md", "keystore-design.md", "secrets.py", "env.py",
+            # its *.key glob, which reads a localization file as a private key
+            "translations.key",
+            # its dot-prefix blanket -- and every one of these shares the .git
+            # prefix or is ordinary project config a query names directly
+            ".github", ".editorconfig", ".gitignore", ".gitattributes",
+            ".gitmodules", ".python-version", ".nvmrc", ".eslintrc.json",
+            # its ROOT_EXCLUDE_DIRS and FILE_GLOB_EXCLUSIONS
+            "tests", "evals", "fixture.zip", "config.pem",
+            # bare `env` is a plausible content directory, unlike `.venv`
+            "env",
+            # the lockfile is the right thing to keep when node_modules goes
+            "package-lock.json",
+            # committed on purpose, and the one file an env query can resolve
+            ".env.example", ".env.sample", ".env.template",
+        ]
+        for name in keep:
+            with self.subTest(name=name):
+                self.assertIsNone(
+                    run_eval_mod._scaffold_exclusion(name),
+                    f"{name} must stay copyable: a query could name it",
+                )
+
+    def test_a_dotenv_template_survives_beside_a_real_dotenv(self):
+        (self.scaffold / ".env").write_text(f"K={OUTSIDE_VIA_DOTENV}\n", encoding="utf-8")
+        (self.scaffold / ".env.example").write_text("K=replace-me\n", encoding="utf-8")
+        root = self.probe_root()
+        self.assertFalse((root / ".env").exists())
+        self.assertEqual(
+            (root / ".env.example").read_text(encoding="utf-8"), "K=replace-me\n"
+        )
+
+    def test_the_lockfile_survives_when_node_modules_is_dropped(self):
+        (self.scaffold / "node_modules").mkdir()
+        (self.scaffold / "node_modules" / "left-pad.js").write_text("x\n", encoding="utf-8")
+        (self.scaffold / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        root = self.probe_root()
+        self.assertFalse((root / "node_modules").exists())
+        self.assertEqual((root / "package-lock.json").read_text(encoding="utf-8"), "{}\n")
+
+    def test_gitignore_survives_while_dot_git_is_dropped(self):
+        """`.gitignore` shares the `.git` prefix, and "add build artifacts to my
+        .gitignore" is exactly the file-naming query --scaffold exists for. An
+        exclusion written as a prefix rather than an exact name kills it."""
+        (self.scaffold / ".git").mkdir()
+        (self.scaffold / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+        (self.scaffold / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+        (self.scaffold / ".gitattributes").write_text("* text=auto\n", encoding="utf-8")
+        root = self.probe_root()
+        self.assertFalse((root / ".git").exists())
+        self.assertEqual((root / ".gitignore").read_text(encoding="utf-8"), "__pycache__/\n")
+        self.assertTrue((root / ".gitattributes").is_file())
+
+    def test_an_ordinary_scaffold_reports_no_exclusions(self):
+        self.assertEqual(validate_scaffold(str(self.scaffold)), [])
+
+    # -- exclusion and the link gate must agree ---------------------------
+
+    @unittest.skipUnless(SYMLINKS_AVAILABLE, "symlink creation is unavailable on this machine")
+    def test_a_link_inside_an_excluded_directory_is_not_a_refusal(self):
+        """Measured before exclusions existed: a .venv holding one linked
+        package, a node_modules holding a pnpm store junction, and symlinked
+        .git/hooks were all refused outright, over entries that would never have
+        been copied."""
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (outside / "pkg.py").write_text("x\n", encoding="utf-8")
+        (self.scaffold / ".venv" / "Lib" / "site-packages").mkdir(parents=True)
+        os.symlink(outside / "pkg.py", self.scaffold / ".venv" / "Lib" / "linked.py")
+        (self.scaffold / ".git" / "hooks").mkdir(parents=True)
+        os.symlink(outside / "pkg.py", self.scaffold / ".git" / "hooks" / "pre-commit")
+
+        root = self.probe_root()
+        self.assertFalse((root / ".venv").exists())
+        self.assertFalse((root / ".git").exists())
+        self.assertTrue((root / "src" / "dedupe.py").exists())
+
+    @unittest.skipIf(os.name != "nt", "NTFS junctions do not exist on this platform")
+    def test_a_junction_inside_an_excluded_directory_is_not_a_refusal(self):
+        outside = self.tmp / "outside"
+        (outside / "store").mkdir(parents=True)
+        (outside / "store" / "index.js").write_text("x\n", encoding="utf-8")
+        (self.scaffold / "node_modules").mkdir()
+        made = _make_junction(self.scaffold / "node_modules" / "shared", outside / "store")
+        self.assertTrue(made, "mklink /J failed; the pnpm-store case is untested")
+
+        root = self.probe_root()
+        self.assertFalse((root / "node_modules").exists())
+
+    @unittest.skipUnless(SYMLINKS_AVAILABLE, "symlink creation is unavailable on this machine")
+    def test_an_excluded_name_that_is_itself_a_link_is_not_a_refusal(self):
+        """Prune-before-check, and over filenames too: a `.git` symlink lands in
+        os.walk's filenames rather than its dirnames, and check-then-prune would
+        refuse a .venv that is itself a junction."""
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (outside / "pointer").write_text("gitdir: elsewhere\n", encoding="utf-8")
+        os.symlink(outside / "pointer", self.scaffold / ".git")
+
+        root = self.probe_root()
+        self.assertFalse((root / ".git").exists())
+
+    # -- the exclusions are told, not silent ------------------------------
+
+    def test_the_cli_reports_what_it_leaves_out_before_the_spend_projection(self):
+        (self.scaffold / ".env").write_text("K=v\n", encoding="utf-8")
+        (self.scaffold / "node_modules").mkdir()
+        (self.scaffold / "node_modules" / "left-pad.js").write_text("x\n", encoding="utf-8")
+
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            self.assertIsNone(check_scaffold(str(self.scaffold)))
+        printed = err.getvalue()
+        self.assertIn("Warning:", printed)
+        self.assertIn(".env", printed)
+        self.assertIn("node_modules/", printed)
+        self.assertIn("scored a non-trigger", printed)
+
+    def test_nothing_is_printed_when_nothing_is_excluded(self):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            check_scaffold(str(self.scaffold))
+        self.assertEqual(err.getvalue(), "")
+
+    def test_excluded_directories_are_reported_without_being_walked(self):
+        """Reporting a file count would mean walking into the very junctions the
+        gate declines to follow, so the report names the path and stops."""
+        (self.scaffold / "node_modules" / "deep").mkdir(parents=True)
+        (self.scaffold / "node_modules" / "deep" / "a.js").write_text("x\n", encoding="utf-8")
+        excluded = validate_scaffold(str(self.scaffold))
+        self.assertEqual(excluded, [("node_modules/", "installed dependencies")])
+
+
+def _hard_links_available(tmp: Path) -> bool:
+    src = tmp / "hl-probe-src.txt"
+    src.write_text("x", encoding="utf-8")
+    try:
+        os.link(src, tmp / "hl-probe-link.txt")
+        return True
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+
+
+# Shape-correct and obviously fake: literal EXAMPLE/zero filler, nothing that
+# could be a live value. Each proves one marker route.
+FAKE_AWS_KEY = "AKIA" + "NOTAREALKEY00000"
+FAKE_PEM_HEADER = "-----BEGIN RSA PRIVATE KEY-----"
+AWS_DOC_PLACEHOLDER = "AKIAIOSFODNN7EXAMPLE"
+OUTSIDE_VIA_HARD_LINK = "SCAFFOLD-OUT-OF-TREE-VIA-HARD-LINK-8d24c7"
+
+
+class TestScaffoldDisclosures(StubHarness):
+    """Two routes reach a probe workspace that exclusion cannot see: a hard
+    link, which is byte-identical to an ordinary file, and a credential inside
+    an innocently named file. Both are reported and copied, never withheld.
+
+    Withholding either would move the recall number -- a query naming an absent
+    path is scored `no_trigger`, which counts, not `error`, which does not --
+    and the user's fix for either leaves the path and its bytes in place, so a
+    report costs nothing to act on. Refusing on `st_nlink > 1` is worse than
+    useless: every ext4 directory has two links (measured 18,696/18,696, against
+    0/8 on NTFS), so it would refuse every Linux scaffold and pass on Windows.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.outside = self.tmp / "outside"
+        self.outside.mkdir()
+        self.scaffold = self.tmp / "scaffold"
+        (self.scaffold / "src").mkdir(parents=True)
+        (self.scaffold / "src" / "dedupe.py").write_text("def f(): pass\n", encoding="utf-8")
+        (self.scaffold / "CLAUDE.md").write_text("house rules\n", encoding="utf-8")
+
+    def probe_root(self) -> Path:
+        root = run_eval_mod._make_probe_root(str(self.scaffold))
+        self.addCleanup(run_eval_mod._release_root, root)
+        return root
+
+    def notes(self) -> list:
+        return run_eval_mod.scaffold_disclosures(str(self.scaffold))
+
+    # -- credential content -----------------------------------------------
+
+    def test_a_credential_in_an_innocently_named_file_is_reported(self):
+        (self.scaffold / "src" / "config.yaml").write_text(
+            f"region: us-east-1\naccess_key: {FAKE_AWS_KEY}\n", encoding="utf-8"
+        )
+        notes = self.notes()
+        self.assertIn(("src/config.yaml", "AWS access key id"), notes)
+
+    def test_a_private_key_block_is_reported(self):
+        (self.scaffold / "notes.md").write_text(
+            f"{FAKE_PEM_HEADER}\nTk9ULUEtUkVBTC1LRVk=\n", encoding="utf-8"
+        )
+        self.assertIn(("notes.md", "private key block"), self.notes())
+
+    def test_a_reported_file_is_still_copied(self):
+        """The whole point of reporting rather than withholding: the path a
+        query might name is still there."""
+        (self.scaffold / "src" / "config.yaml").write_text(
+            f"access_key: {FAKE_AWS_KEY}\n", encoding="utf-8"
+        )
+        root = self.probe_root()
+        self.assertTrue((root / "src" / "config.yaml").is_file())
+
+    def test_the_report_never_echoes_the_matched_bytes(self):
+        """check_scaffold prints to stderr, which lands in CI logs. A report
+        carrying the match would turn the detector into the leak."""
+        (self.scaffold / "src" / "config.yaml").write_text(
+            f"access_key: {FAKE_AWS_KEY}\n", encoding="utf-8"
+        )
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            check_scaffold(str(self.scaffold))
+        printed = err.getvalue()
+        self.assertIn("src/config.yaml", printed)
+        self.assertIn("AWS access key id", printed)
+        self.assertNotIn(FAKE_AWS_KEY, printed)
+
+    def test_the_aws_documentation_placeholder_is_not_reported(self):
+        """AWS's own published example is structurally identical to a live key,
+        and any scaffold documenting AWS setup carries it."""
+        (self.scaffold / "docs.md").write_text(
+            f"Set AWS_ACCESS_KEY_ID={AWS_DOC_PLACEHOLDER} in your shell.\n", encoding="utf-8"
+        )
+        self.assertEqual(self.notes(), [])
+
+    def test_ordinary_content_is_not_reported(self):
+        """Entropy scoring was rejected for firing on these: 28 of its 30 false
+        positives on this repository were file paths."""
+        (self.scaffold / "package-lock.json").write_text(
+            '{"integrity": "sha512-' + "A" * 80 + 'abcd=="}\n', encoding="utf-8"
+        )
+        (self.scaffold / "version.py").write_text(
+            'SHA = "9f2b1c0d4e7a8b3c5d6e0f1a2b3c4d5e6f708192"\n', encoding="utf-8"
+        )
+        (self.scaffold / "auth.md").write_text(
+            "Set ANTHROPIC_API_KEY. Rotate the token and the password.\n", encoding="utf-8"
+        )
+        self.assertEqual(self.notes(), [])
+
+    def test_a_marker_inside_an_excluded_directory_is_not_reported(self):
+        (self.scaffold / "node_modules" / "aws-sdk").mkdir(parents=True)
+        (self.scaffold / "node_modules" / "aws-sdk" / "fixture.js").write_text(
+            f"const k = '{FAKE_AWS_KEY}';\n", encoding="utf-8"
+        )
+        self.assertEqual(self.notes(), [])
+
+    def test_a_binary_file_does_not_break_the_scan(self):
+        (self.scaffold / "logo.png").write_bytes(bytes(range(256)) * 8)
+        self.assertEqual(self.notes(), [])
+
+    def test_a_non_utf8_file_is_still_scanned(self):
+        """A decode-first scanner raises UnicodeDecodeError here and skips the
+        file, which converts a true positive into silence. Raw bytes see it."""
+        (self.scaffold / "legacy.txt").write_bytes(
+            "caf\xe9 ".encode("cp1252") + FAKE_AWS_KEY.encode("ascii") + b"\n"
+        )
+        self.assertIn(("legacy.txt", "AWS access key id"), self.notes())
+
+    def test_a_utf16_file_is_still_scanned(self):
+        """Raw bytes miss this one on NUL interleaving, so a BOM triggers a
+        second decode pass."""
+        (self.scaffold / "spec.txt").write_bytes(
+            f"key = {FAKE_AWS_KEY}\n".encode("utf-16")
+        )
+        self.assertIn(("spec.txt", "AWS access key id"), self.notes())
+
+    # -- hard links --------------------------------------------------------
+
+    def test_a_hard_link_to_a_file_outside_the_tree_is_reported(self):
+        if not _hard_links_available(self.tmp):
+            self.skipTest("hard link creation is unavailable on this machine")
+        target = self.outside / "creds.txt"
+        target.write_text(OUTSIDE_VIA_HARD_LINK, encoding="utf-8")
+        os.link(target, self.scaffold / "notes.txt")
+        paths = [path for path, _ in self.notes()]
+        self.assertIn("notes.txt", paths)
+
+    def test_a_reported_hard_link_is_still_copied(self):
+        if not _hard_links_available(self.tmp):
+            self.skipTest("hard link creation is unavailable on this machine")
+        target = self.outside / "creds.txt"
+        target.write_text(OUTSIDE_VIA_HARD_LINK, encoding="utf-8")
+        os.link(target, self.scaffold / "notes.txt")
+        root = self.probe_root()
+        self.assertEqual(
+            (root / "notes.txt").read_text(encoding="utf-8"), OUTSIDE_VIA_HARD_LINK
+        )
+
+    def test_two_in_tree_names_for_one_inode_are_not_reported(self):
+        """Inode accounting, not bare st_nlink: a tree's own internal duplicate
+        has both names inside the scaffold and is acquitted."""
+        if not _hard_links_available(self.tmp):
+            self.skipTest("hard link creation is unavailable on this machine")
+        first = self.scaffold / "CLAUDE.md"
+        os.link(first, self.scaffold / "src" / "CLAUDE.md")
+        self.assertEqual(self.notes(), [])
+
+    def test_directories_are_never_reported_as_hard_links(self):
+        """Every ext4 directory has st_nlink >= 2, so a rule reaching
+        directories refuses every Linux scaffold and passes on Windows."""
+        (self.scaffold / "a" / "b" / "c").mkdir(parents=True)
+        (self.scaffold / "a" / "b" / "c" / "f.py").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.notes(), [])
+
+    # -- the ordinary case is silent ---------------------------------------
+
+    def test_an_ordinary_scaffold_discloses_nothing(self):
+        self.assertEqual(self.notes(), [])
+        self.assertEqual(run_eval_mod.scaffold_disclosures(None), [])
+
+    def test_nothing_is_printed_when_there_is_nothing_to_disclose(self):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            check_scaffold(str(self.scaffold))
+        self.assertEqual(err.getvalue(), "")
 
 
 if __name__ == "__main__":
