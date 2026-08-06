@@ -441,8 +441,13 @@ class TestSkillMdEncodingGuard(unittest.TestCase):
                 )
 
 
-def _fake_probe(status_by_query):
-    """Build a run_single_query replacement driven by a query -> [status] map."""
+def _fake_probe(status_by_query, cost_usd=0.01):
+    """Build a run_single_query replacement driven by a query -> [status] map.
+
+    `cost_usd` is what each record carries. It is deliberately settable to an
+    int or to zero: the aggregator must treat both as measured cost, not as
+    absent cost.
+    """
     calls: dict[str, int] = {}
 
     def fake(query, skill_name, skill_description, timeout, *args, **kwargs):
@@ -459,7 +464,7 @@ def _fake_probe(status_by_query):
             "error": "stubbed failure" if status == "error" else None,
             "tools": [],
             "elapsed_seconds": 0.0,
-            "cost_usd": 0.01,
+            "cost_usd": cost_usd,
             "probe_root": None,
         }
 
@@ -469,8 +474,9 @@ def _fake_probe(status_by_query):
 class TestAggregation(unittest.TestCase):
     """C4/C8: errored probes are excluded, never counted as non-triggers."""
 
-    def _run(self, eval_set, status_by_query, runs=3, **kwargs):
-        with mock.patch.object(run_eval_mod, "run_single_query", _fake_probe(status_by_query)):
+    def _run(self, eval_set, status_by_query, runs=3, probe_cost=0.01, **kwargs):
+        probe = _fake_probe(status_by_query, cost_usd=probe_cost)
+        with mock.patch.object(run_eval_mod, "run_single_query", probe):
             return run_eval(
                 eval_set=eval_set,
                 skill_name="widget-forge",
@@ -532,6 +538,26 @@ class TestAggregation(unittest.TestCase):
         eval_set = [{"query": "positive", "should_trigger": True}]
         out = self._run(eval_set, {"positive": ["trigger"]}, runs=2)
         self.assertAlmostEqual(out["summary"]["actual_cost_usd"], 0.02, places=4)
+
+    def test_an_integer_cost_still_counts(self):
+        """The sum site used to accept a bare float while the read site accepted
+        (int, float). isinstance(5, float) is False, so an int-valued cost was
+        dropped without a warning -- and if it were the only cost present, a
+        billed run reported actual_cost_usd: None, i.e. 'nobody reported a
+        cost'. Unreachable through the real worker, which coerces with float();
+        reachable by any other producer of a record."""
+        eval_set = [{"query": "positive", "should_trigger": True}]
+        out = self._run(eval_set, {"positive": ["trigger"]}, runs=2, probe_cost=5)
+        self.assertAlmostEqual(out["summary"]["actual_cost_usd"], 10.0, places=4)
+
+    def test_a_measured_zero_reports_zero_not_none(self):
+        """The have_cost latch, not `if total_cost`. Absent data is absent and
+        never zero -- but the converse holds too: a cost that was measured and
+        came back 0.0 is data, and must not be laundered into None."""
+        eval_set = [{"query": "positive", "should_trigger": True}]
+        out = self._run(eval_set, {"positive": ["trigger"]}, runs=2, probe_cost=0.0)
+        self.assertIsNotNone(out["summary"]["actual_cost_usd"])
+        self.assertEqual(out["summary"]["actual_cost_usd"], 0.0)
 
 
 class TestSpendGate(unittest.TestCase):
