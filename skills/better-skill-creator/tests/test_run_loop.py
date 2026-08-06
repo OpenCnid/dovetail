@@ -36,6 +36,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 if str(SKILL_ROOT) not in sys.path:
@@ -765,7 +767,13 @@ class TestMainWiring(LoopHarness):
         """C7: no bare /tmp. The path has to come from tempfile.gettempdir()."""
         opened = self._main("--report", "auto")
         self.assertEqual(len(opened), 1)
-        target = Path(opened[0].replace("file:///", "").replace("/", os.sep))
+        # run_loop hands webbrowser.open a Path.as_uri(), and url2pathname is that
+        # call's exact inverse on both platforms. Stripping "file:///" textually
+        # instead drops the leading slash of a POSIX path -- "file:///tmp/r.html"
+        # became the *relative* "tmp/r.html" -- so this passed on Windows, where
+        # the URI carries a drive letter, and failed on Linux. It also decodes the
+        # percent-escapes that a temp directory containing a space would produce.
+        target = Path(url2pathname(urlparse(opened[0]).path))
         self.addCleanup(lambda: target.exists() and target.unlink())
         self.assertTrue(
             str(target).lower().startswith(str(Path(tempfile.gettempdir())).lower()),
