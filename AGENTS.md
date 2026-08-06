@@ -117,8 +117,9 @@ tag from a commit that is already on `main`.
 
 Run `bash scripts/check-release.sh` before you tag and read what it says. It
 asks the five things a release can get wrong — manifests agreeing, manifests
-matching the tag, a notes entry, the commit being on `main`, and `checks` having
-concluded success **on that exact SHA** — and `.github/workflows/release.yml`
+matching the tag, a notes entry, the commit being on `main` (and where that
+commit is HEAD, *being* `main`), and `checks` having concluded success **on that
+exact SHA** — and `.github/workflows/release.yml`
 asks them again when the tag is pushed. The last one is the reason the script
 exists: `checks.yml` runs on commits, so a tag can point at anything, and at
 `0.4.0` it pointed at the commit before four green fixes for as long as nobody
@@ -141,6 +142,26 @@ where "never released" and "never fetched" are the same evidence, and there it
 reports that it could not run rather than passing. `release.yml` keeps
 `fetch-depth: 0` for that reason, and `test-release-check.sh` asserts it does.
 
+**The modes also hold their commit to different standards, and that seam leaked
+next.** Being on `main` is the whole of what a tag has to prove — a released tag
+is always behind the tip — but it is not what HEAD mode asks, and
+`git merge-base --is-ancestor` is satisfied by every commit `main` has ever
+carried. A `workflow_dispatch` takes a ref of the operator's choosing, so a run
+from a stale branch or an old tag went straight through: with HEAD at `313b9e4`
+and `origin/main` at `5b36154`, `bash scripts/check-release.sh --strict --head`
+reported every check `ok` and exited 0, while the commit it was missing was
+`5b36154` — the fix to this gate's own injection hole. Green checks, fixes
+landed afterwards, the gate blessing the state before them: the `0.4.0` shape a
+third time. A run grading HEAD now requires `main`'s tip and names how far
+behind HEAD is; a run grading a resolved tag keeps ancestry. **That line is
+drawn on the commit, not on the mode** — they part company in the third way in,
+where a tag named on the command line has no local ref: the mode is still
+explicit-tag, but there is nothing to resolve, so the subject is HEAD and it
+gets HEAD's standard. That is the "checking a release I am about to cut" path,
+and cutting it from a stale checkout is how `0.4.0` happened. `release.yml`'s
+`Fetch main` step is load-bearing for the comparison, since a stale
+`origin/main` makes a stale HEAD look current.
+
 `release.yml` picks the mode from `github.event_name`, not from `ref_type`: a
 dispatch launched from a tag ref reports `ref_type: tag` too, so `ref_type`
 cannot tell a dispatch from a push.
@@ -154,8 +175,10 @@ the tag to the script through `env: RELEASE_TAG` and expands it quoted, because
 `${{ }}` inside a `run:` body substitutes into the shell source before bash
 parses it, and a tag name is chosen by whoever pushes the tag.
 `scripts/test-release-check.sh` holds both halves of that in place, pins which
-commit each mode grades — in a throwaway repository it builds with a tag and a
-later commit on `main`, so the two answers are different commits — and runs in
+commit each mode grades and which commits each mode will accept — in a throwaway
+repository it builds with a tag and a later commit on `main`, so the two answers
+are different commits and the tagged one is an ancestor HEAD mode must refuse
+while explicit-tag mode must not — and runs in
 `checks`; if you add a workflow, it will also tell you if a `run:` body reads an
 attacker-nameable context.
 
