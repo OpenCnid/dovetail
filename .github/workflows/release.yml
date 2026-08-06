@@ -46,9 +46,18 @@ jobs:
       - name: Fetch main
         run: git fetch --no-tags origin +main:refs/remotes/origin/main
 
+      # The tag reaches the script as an argument and never as text spliced into
+      # this line. `github.ref_name` is whatever the pusher named the ref, and
+      # `${{ }}` substitutes into the shell source *before* bash parses it, so a
+      # tag named `dovetail--v9.9.9$(id)` -- legal to git, and a match for the
+      # trigger above -- ran `id` on the runner with the workflow's token in the
+      # environment. An `env:` value is data instead: the runner sets the
+      # variable, and bash expands it quoted, without parsing what it holds.
+      #
+      # On `workflow_dispatch` there is no tag and this is the empty string,
+      # which check-release.sh's argument loop ignores by name.
       - name: Release check
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          bash scripts/check-release.sh --strict
-          ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: bash scripts/check-release.sh --strict "$RELEASE_TAG"

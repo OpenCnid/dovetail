@@ -26,6 +26,11 @@
 #   4. the commit is on `main`                    (nothing ships off a branch)
 #   5. `checks` concluded success on that SHA     (needs `gh`; see --strict)
 #
+# Before any of them, the tag has to be a tag this pack could have issued:
+# `<plugin>--v<major>.<minor>.<patch>`, optionally `-<prerelease>`. Anything
+# else exits 2 without reading a manifest or touching git. See the block above
+# the check for why a release gate validates the shape of its own input.
+#
 # Usage:
 #   bash scripts/check-release.sh                     # check HEAD as the tag
 #                                                     #   the manifests imply
@@ -61,10 +66,33 @@ if [ -z "$TAG" ]; then
   echo
 fi
 
+# The tag is the one input here that somebody else names, and `git` accepts far
+# more in a ref than this convention does: `dovetail--v9.9.9$(id)` is a legal
+# tag name and matches the release workflow's `dovetail--v*` trigger. Nothing in
+# this script evaluates it -- every use below is quoted, and the workflow now
+# hands it over in an environment variable rather than splicing it into a
+# command line -- so this is the layer that means a tag whose shape cannot be
+# parsed is refused outright rather than half-read into a version string.
+#
+# Deliberately narrower than `git check-ref-format`: the convention is
+# `<plugin>--v<major>.<minor>.<patch>`, optionally `-<prerelease>`, and a
+# release gate has no reason to accept anything else. The character class comes
+# first so that a rejection message can quote the tag knowing what is in it.
+VERSION_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
+
+reject_tag() {
+  echo "not a $PLUGIN release tag: $1" >&2
+  echo "expected ${PLUGIN}--v<major>.<minor>.<patch>[-prerelease]" >&2
+  exit 2
+}
+
 case "$TAG" in
-  "${PLUGIN}--v"*) VERSION="${TAG#"${PLUGIN}--v"}" ;;
-  *) echo "not a $PLUGIN release tag: $TAG (expected ${PLUGIN}--v<version>)" >&2; exit 2 ;;
+  *[!A-Za-z0-9.-]*) reject_tag "$TAG" ;;
+  "${PLUGIN}--v"*)  VERSION="${TAG#"${PLUGIN}--v"}" ;;
+  *)                reject_tag "$TAG" ;;
 esac
+
+[[ "$VERSION" =~ $VERSION_RE ]] || reject_tag "$TAG"
 
 # An annotated tag's own object is not the commit it points at, and `git
 # rev-list -n 1` resolves through to the commit either way.
