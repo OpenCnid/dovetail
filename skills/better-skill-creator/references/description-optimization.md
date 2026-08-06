@@ -153,7 +153,7 @@ sharing one directory saw each other's entries and scored each other's skills.
 
 ## When a run measures nothing
 
-Two conditions silently zero this measurement, and both are now detected and reported in
+Three conditions silently distort this measurement, and all three are now detected and reported in
 `harness_health` — check it before believing any score.
 
 **The probe never registered.** If the temporary command file wasn't picked up, there was nothing to
@@ -164,6 +164,14 @@ the probe and the installation compete, and recall collapses toward zero. `compe
 them. This is worth checking first when a score looks bad, because it is indistinguishable from a bad
 description by inspection — the same description measured against a shadowed probe and an isolated one
 can differ by more than an order of magnitude, with nothing else changed.
+
+**A `--scaffold` path a query named was never copied.** Version control, dependency trees, credential
+stores, dotenv files and `.claude/` directories are left out of every probe workspace. A query naming
+one of those paths finds nothing there, spends its tool budget looking, and scores as a non-trigger —
+which counts toward recall, unlike an error, which does not. `scaffold_exclusions` lists every path
+left out and why; `scaffold_disclosures` names files that were copied but are worth a look first, such
+as one carrying a credential-shaped string. Both are also printed to stderr before the run starts,
+which is the last point where fixing the scaffold is free.
 
 Probes that fail — timeout, crash, missing CLI, rate limit — are recorded as **errors** and excluded
 from scoring. They are not counted as "the skill correctly did not trigger." That distinction is

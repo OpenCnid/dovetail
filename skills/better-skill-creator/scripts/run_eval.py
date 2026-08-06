@@ -50,15 +50,44 @@ DESIGN NOTES (things that were wrong before, so nobody re-introduces them)
   prefix matching scores a model's *refusal* to invoke ("one skill appears to be
   impersonating another", followed by Reads of the clone files to audit them) as
   a successful trigger.
+* A ``--scaffold`` entry that is copied at all must be a real file or directory.
+  ``copytree``/``copy2`` follow what they are handed, so a link at *any* depth
+  put its target's content in the probe root, where the probe then runs.
+  Preserving links instead only relocates the leak — the recreated link still
+  points out of the tree — and ``copytree(symlinks=True)`` dereferences an NTFS
+  junction anyway, because it keys off ``os.path.islink``, which is False for
+  one. Gate on the reparse attribute, never on ``is_symlink()``.
+  (Measured on CPython 3.13.1, Windows 10 10.0.19045, 2026-08-06.)
+* A short list of names is dropped from the copy instead: version control,
+  dependency trees, credential stores, dotenv files. ``.git`` is the security
+  entry — in a worktree checkout it is a *file* holding an absolute ``gitdir:``
+  pointer, which makes the probe root a live, writable checkout of the user's
+  real repository, and no link is involved for the gate above to catch.
+  (Measured 2026-08-06; a branch created from a probe root appeared in the host
+  repository's ``refs/heads``.) The list stays short on purpose: a query naming
+  an absent path is scored ``no_trigger``, not ``error``, so over-excluding
+  moves the recall number silently. What is excluded is reported, never assumed
+  read.
+* That asymmetry is why the checks below it report rather than withhold. A hard
+  link and a credential inside an innocently named file both reach the probe
+  root, and both are named to the user instead of dropped: withholding either
+  would move the recall number, while the user's fix for either leaves the path
+  and its bytes exactly where they were. Refusing on ``st_nlink > 1`` is worse
+  than useless — every ext4 directory has two links, so it refuses every Linux
+  scaffold while passing on Windows, and a hard-link backup reports every file
+  in a tree that nothing entered.
 """
 
 import argparse
 import atexit
+import fnmatch
 import json
 import os
 import queue
+import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -239,17 +268,507 @@ def _pump(stream, sink) -> None:
         sink(_TERMINAL)
 
 
+class ScaffoldError(ValueError):
+    """A ``--scaffold`` tree that must not be copied into a probe root."""
+
+
+def _redirect_kind(entry: Path) -> str | None:
+    """Name how *entry* redirects, or None when it is ordinary content.
+
+    Gates on the reparse *attribute* rather than on ``is_symlink()``, which
+    answers False for an NTFS directory junction — and a junction needs no
+    elevation to create, so it is the reachable form on Windows rather than the
+    exotic one. The packager was bitten by exactly this and decided containment
+    the same way; see ``package_skill.py``'s module docstring.
+
+    An entry that cannot be stat-ed is refused rather than guessed at.
+    """
+    try:
+        info = entry.lstat()
+    except OSError:
+        return "unreadable entry"
+    if stat.S_ISLNK(info.st_mode):
+        return "symlink"
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if getattr(info, "st_file_attributes", 0) & reparse_flag:
+        tag = getattr(info, "st_reparse_tag", 0)
+        if tag == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003):
+            return "directory junction"
+        if tag == getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C):
+            return "symlink"
+        return f"reparse point (tag {tag:#x})"
+    if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+        return "special file"
+    return None
+
+
+def _redirect_target(entry: Path) -> str:
+    """Where an entry points, in a form a human can recognize."""
+    try:
+        target = os.readlink(entry)
+    except (OSError, ValueError):
+        # Not a link, or a reparse tag os.readlink does not understand. The
+        # resolved path is the honest answer in both cases.
+        try:
+            return str(entry.resolve())
+        except (OSError, ValueError, RuntimeError):
+            return "<unreadable>"
+    # Windows hands back the extended-length form for absolute targets.
+    if target.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + target[8:]
+    if target.startswith("\\\\?\\"):
+        return target[4:]
+    return target
+
+
+# Names never copied into a probe root, matched case-folded against the whole
+# basename, for files and directories alike and at every depth.
+#
+# Deliberately far smaller than package_skill.py's policy, which decides what a
+# *stranger* receives from a published archive. This decides what a probe's
+# working directory holds, and --scaffold exists so "file paths named in queries
+# resolve" — so a name a query could plausibly reach for must not be here. That
+# is not a stylistic preference: a query naming an absent path spends the
+# --max-tools budget hunting for it and is recorded ``no_trigger``, which is
+# scored, rather than ``error``, which is not. Over-excluding therefore moves
+# the recall number this harness exists to produce, and moves it silently.
+#
+# Measured against package_skill.py's tables, 2026-08-06: its SENSITIVE_WORDS
+# and SENSITIVE_COMPOUNDS rules drop tokens.md, token-limits.md,
+# counting-tokens.py and api-key-reference.md; its dot-prefix blanket drops
+# .github, .editorconfig and .python-version; its ROOT_EXCLUDE_DIRS drops
+# tests/; and its *.key glob drops translations.key. Of 41 realistic scaffold
+# entries it kept three. None of those rules are adopted here.
+SCAFFOLD_EXCLUDED_NAMES = {
+    # Version control. `.git` is the one entry that is a security exclusion
+    # rather than a housekeeping one, and it is not only the credentialed remote
+    # URL in .git/config: in a `git worktree` checkout `.git` is a *file* holding
+    # an absolute `gitdir:` pointer, which makes the probe root a live and
+    # writable checkout of the user's real repository. No link is involved, so
+    # the reparse gate below cannot see it. Excluded by name for that reason.
+    ".git": "version control metadata (may carry credentialed remote URLs)",
+    ".hg": "version control metadata",
+    ".svn": "version control metadata",
+    # Dependency and build trees. No eval query resolves a path inside one, and
+    # they are the bulk of what a per-probe copy would carry.
+    ".venv": "virtual environment",
+    "venv": "virtual environment",
+    # POSIX `venv` symlinks bin/python (Lib/venv/__init__.py sets use_symlinks
+    # False only under os.name == "nt"), so an unexcluded environment directory
+    # is a refusal on Linux and macOS and an accept on Windows. Bare `env` is
+    # deliberately absent: it is far more often content than an environment.
+    ".tox": "test environment",
+    ".nox": "test environment",
+    ".direnv": "direnv environment",
+    ".conda": "conda environment",
+    "virtualenv": "virtual environment",
+    "node_modules": "installed dependencies",
+    "site-packages": "installed dependencies",
+    "__pycache__": "Python bytecode cache",
+    # Credential stores. Named individually rather than by a dot-prefix blanket,
+    # which would also take .github, .editorconfig and .gitignore.
+    ".ssh": "SSH key material - may contain secrets",
+    ".gnupg": "GnuPG key material - may contain secrets",
+    ".aws": "cloud credentials - may contain secrets",
+    ".azure": "cloud credentials - may contain secrets",
+    ".gcloud": "cloud credentials - may contain secrets",
+    ".kube": "cluster credentials - may contain secrets",
+    ".docker": "registry credentials - may contain secrets",
+    ".npmrc": "package registry token - may contain secrets",
+    ".pypirc": "package registry token - may contain secrets",
+    "id_rsa": "SSH private key",
+    "id_dsa": "SSH private key",
+    "id_ecdsa": "SSH private key",
+    "id_ed25519": "SSH private key",
+}
+
+# Patterns, case-folded against the whole basename. Held to dotenv spellings
+# alone. The packager's wider key-material globs are not adopted: `*.key` reads
+# translations.key as a private key, and a localization file a query names is
+# exactly what must not disappear.
+_ENV_REASON = "environment file - may contain secrets"
+SCAFFOLD_EXCLUDED_GLOBS = (
+    (".env", _ENV_REASON),
+    (".env.*", _ENV_REASON),
+    ("*.env", _ENV_REASON),
+)
+
+# Spellings that exist precisely to be committed: they document which variables
+# a project needs while carrying none of their values. `.env.*` matches every
+# one of them, and dropping a scaffold's `.env.example` would take away the one
+# file an env-shaped query can legitimately resolve.
+SCAFFOLD_ENV_TEMPLATES = frozenset({
+    ".env.example", ".env.sample", ".env.template", ".env.dist", ".env.defaults",
+})
+
+# Left out at every depth, not just the top level. The probe writes its own
+# .claude/commands/ into the workspace root, and a scaffold's directory there
+# would collide with it — but the deeper reason is that `.claude/skills/` is
+# discovered at depth: `references/how-skills-load.md` records that a skill at
+# `apps/web/.claude/skills/deploy` registers as `apps/web:deploy`. A scaffold
+# carrying one would put a competing skill in the probe's own session, which
+# measures something other than the description under test.
+#
+# Nested `.claude/settings.json` appears NOT to be read — the shipped CLI names
+# four settings sources (user, policy, local, project) and no directory-scoped
+# variant, and this repo's own findings measured a copied `permissions.allow`
+# being discarded in an untrusted workspace. The skills path is the evidenced
+# one; the directory goes as a whole because splitting it would keep
+# `.claude/skills/` out while leaving the collision case in.
+_DOT_CLAUDE_REASON = "Claude Code configuration; the probe supplies its own, and a nested skill would compete"
+
+
+def _scaffold_exclusion(name: str) -> str | None:
+    """Why *name* is left out of a probe root, or None when it is copied.
+
+    Case-folded, because ``.GIT`` and ``__PYCACHE__`` name the same directory
+    entries as their lowercase spellings on Windows and macOS; the packager's
+    exact-name tables are case-sensitive and miss exactly that. On a
+    case-sensitive filesystem this over-excludes in principle — ``.GIT`` really
+    is a distinct directory on ext4 — but every differently-cased spelling of a
+    name in these tables is either the thing being excluded anyway or
+    implausible as content, whereas a ``.git`` created as ``.GIT`` on NTFS or
+    APFS would otherwise put a credentialed config in every probe root.
+
+    Depth-independent: no name here means one thing at the top level and
+    another below it.
+    """
+    lowered = name.lower()
+    if lowered == ".claude":
+        return _DOT_CLAUDE_REASON
+    if lowered in SCAFFOLD_ENV_TEMPLATES:
+        return None
+    reason = SCAFFOLD_EXCLUDED_NAMES.get(lowered)
+    if reason is not None:
+        return reason
+    for pattern, why in SCAFFOLD_EXCLUDED_GLOBS:
+        if fnmatch.fnmatch(lowered, pattern):
+            return why
+    return None
+
+
+def _copytree_ignore(dirpath: str, names: list[str]) -> set[str]:
+    """``shutil.copytree``'s ignore hook, so exclusion applies at every depth."""
+    return {name for name in names if _scaffold_exclusion(name) is not None}
+
+
+def validate_scaffold(scaffold: str | None) -> list[tuple[str, str]]:
+    """Refuse a scaffold whose entries are not plain files and directories.
+
+    ``copytree``/``copy2`` follow what they are handed, so an entry that
+    redirects has its *target's content* materialized inside the probe root as
+    ordinary content — and the probe subprocess runs with that root as its cwd.
+    Copying links as links is not the fix: the recreated link still points out
+    of the tree and the probe can follow it later.
+
+    Everything the copy leaves out is left out of this walk first, and by the
+    same predicate. The two must agree in that direction or the check refuses a
+    scaffold over an entry that would never have been copied — measured, a
+    ``.venv`` holding one linked package, a ``node_modules`` holding a pnpm store
+    junction, and a repository whose ``.git/hooks`` are symlinked to a shared
+    directory were all refused before the exclusions existed. They must agree in
+    the other direction too: what is walked is exactly what is copied, so no
+    excluded subtree hides a link the copy would then follow.
+
+    The rest of the tree is walked in full, not just its top level. A scaffold
+    whose own children are all ordinary directories still leaks when a link sits
+    further down, because ``copytree`` dereferences at every depth.
+
+    Returns the excluded paths and their reasons, in walk order, so one traversal
+    serves both the refusal and the report. Excluded directories are pruned
+    rather than measured: reporting a file count for one would mean walking into
+    the junctions this function exists to decline.
+
+    Two routes this refusal does not cover, both handled by
+    :func:`scaffold_disclosures` as reports rather than gates, and one it cannot
+    cover at all:
+
+    * A **hard link** has no target to resolve and is indistinguishable from an
+      ordinary file. It is reported, never refused: direction is undecidable,
+      because nothing on disk records which name came first, so a scaffold that
+      was hard-link snapshotted (``cp -al``, ``rsync --link-dest``, rsnapshot)
+      reports every file as having an unaccounted name with nothing having
+      entered the tree — measured 10 of 10. A bare ``st_nlink > 1`` is worse
+      still in this loop, since every ext4 directory has ``st_nlink >= 2``
+      (measured 18,696 of 18,696, against 0 of 8 on NTFS), so it would refuse
+      every Linux scaffold and pass on Windows.
+    * A **credential inside an innocently named file** is copied. High-precision
+      markers report it; nothing here withholds the file, because a withheld
+      path a query names is scored a non-trigger.
+    * A **POSIX mount point or bind mount** inside the scaffold is an ordinary
+      directory to ``lstat`` — no ``S_IFLNK``, no reparse attribute — so
+      ``copytree`` materializes what is mounted there. Windows closes the
+      equivalent case only because a volume mount point carries
+      ``IO_REPARSE_TAG_MOUNT_POINT``. Comparing ``st_dev`` would close it and
+      would also refuse a scaffold that legitimately spans a mount, so it is
+      named here rather than gated.
+
+    (Measured on CPython 3.13.1 / Windows 10 10.0.19045 and CPython 3.12.3 /
+    WSL2 ext4, 2026-08-06.)
+    """
+    if not scaffold:
+        return []
+    src = Path(scaffold)
+    if not src.is_dir():
+        raise ScaffoldError(f"--scaffold {src} is not a directory")
+    excluded: list[tuple[str, str]] = []
+    for parent, dirnames, filenames in os.walk(src, topdown=True, followlinks=False):
+        here = Path(parent)
+
+        # Excluded before examined, and before os.walk descends. The other order
+        # refuses a .venv that is itself a junction, over an entry the copy loop
+        # never touches.
+        kept_dirs = []
+        for name in sorted(dirnames):
+            reason = _scaffold_exclusion(name)
+            if reason is None:
+                kept_dirs.append(name)
+            else:
+                excluded.append((f"{(here / name).relative_to(src).as_posix()}/", reason))
+        dirnames[:] = kept_dirs
+
+        kept_files = []
+        for name in sorted(filenames):
+            reason = _scaffold_exclusion(name)
+            if reason is None:
+                kept_files.append(name)
+            else:
+                excluded.append(((here / name).relative_to(src).as_posix(), reason))
+
+        # Files as well as directories: in a git worktree checkout `.git` is a
+        # file, and a `.git` symlink lands here rather than in dirnames.
+        for name in kept_dirs + kept_files:
+            entry = here / name
+            kind = _redirect_kind(entry)
+            if kind is not None:
+                # Raised before os.walk descends, so a junction is never walked
+                # through: followlinks=False does not prune one.
+                raise ScaffoldError(
+                    f"--scaffold {src} contains a {kind}, which would be copied as "
+                    f"whatever it points at rather than as itself:\n"
+                    f"         {entry.relative_to(src)} -> {_redirect_target(entry)}"
+                )
+    return excluded
+
+
+# Credential markers, each self-identifying: a vendor-assigned prefix with a
+# fixed body length, or a format-defined delimiter line. Nothing statistical.
+#
+# Entropy scoring was measured and rejected: at the lowest threshold with usable
+# recall it produced 30 false positives on this repository, 28 of them file
+# paths — the exact string class --scaffold exists to make resolvable — and the
+# standard refinement that bans "/" to kill those discards 48% of real base64
+# AWS secret keys, since standard base64 contains "/". Bare 32-hex scored 1,401
+# false positives on the Python standard library. (Measured 2026-08-06 over
+# 43.2 MB / 2,692 files across this repository and CPython 3.13's Lib/.)
+_CREDENTIAL_MARKERS = (
+    (re.compile(rb"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY(?: BLOCK)?-----"), "private key block"),
+    (re.compile(rb"^PuTTY-User-Key-File-\d+:", re.MULTILINE), "PuTTY private key"),
+    (re.compile(rb"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])"), "AWS access key id"),
+    (re.compile(rb"(?<![A-Za-z0-9_])gh[pousr]_[A-Za-z0-9]{36}(?![A-Za-z0-9])"), "GitHub token"),
+    (re.compile(rb"(?<![A-Za-z0-9_])github_pat_[A-Za-z0-9_]{82}(?![A-Za-z0-9])"), "GitHub PAT"),
+    (re.compile(rb"(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20}(?![A-Za-z0-9_-])"), "GitLab PAT"),
+    (re.compile(rb"(?<![A-Za-z0-9-])xox[abposr]-[0-9]{10,13}-[0-9A-Za-z-]{10,}"), "Slack token"),
+    (re.compile(rb"https://hooks\.slack\.com/services/T[0-9A-Z]{8,12}/B[0-9A-Z]{8,12}/[0-9A-Za-z]{24}"),
+     "Slack webhook"),
+    (re.compile(rb"(?<![A-Za-z0-9_])[sr]k_live_[0-9A-Za-z]{24,}"), "Stripe live key"),
+    (re.compile(rb"(?<![A-Za-z0-9_-])sk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{80,}"), "Anthropic API key"),
+    (re.compile(rb"(?<![A-Za-z0-9_-])sk-proj-[A-Za-z0-9_-]{40,}"), "OpenAI project key"),
+    (re.compile(rb"(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])"), "Google API key"),
+    (re.compile(rb"(?<![A-Za-z0-9_])npm_[A-Za-z0-9]{36}(?![A-Za-z0-9])"), "npm token"),
+    (re.compile(rb"(?<![A-Za-z0-9_-])pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}"), "PyPI token"),
+    (re.compile(rb"(?<![A-Za-z0-9._-])SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"),
+     "SendGrid key"),
+    (re.compile(rb"AccountKey=[A-Za-z0-9+/]{86}=="), "Azure storage key"),
+)
+
+# Cheap literal gate: a file whose bytes contain none of these cannot match any
+# marker, and skipping the alternation for it is a measured 15-19x speedup with
+# an identical hit set.
+_CREDENTIAL_PREFILTER = re.compile(
+    rb"PRIVATE KEY|PuTTY-User-Key|AKIA|ASIA|gh[pousr]_|github_pat_|glpat-|xox[abposr]-"
+    rb"|hooks\.slack\.com|k_live_|sk-ant-|sk-proj-|AIza|npm_|pypi-AgEI|SG\.|AccountKey="
+)
+
+# AWS's own published documentation placeholder. Structurally identical to a
+# live key, and a scaffold that documents AWS setup will carry it.
+_CREDENTIAL_ALLOWLIST = (b"AKIAIOSFODNN7EXAMPLE",)
+
+# Read bound, plus an overlap so a marker starting near the edge is not cut in
+# half. Measured: a 32-byte marker beginning 10 bytes before a 4 KiB bound is
+# missed without the overlap. No size-based skip — at this bound a 48 MB binary
+# already costs only the bound, and the extra stat measured slower than nothing.
+_CREDENTIAL_READ_BYTES = 64 * 1024
+_CREDENTIAL_OVERLAP = 128
+
+
+def _credential_markers_in(data: bytes) -> list[str]:
+    """Marker kinds present in *data*, never the matched bytes themselves."""
+    if not _CREDENTIAL_PREFILTER.search(data):
+        return []
+    for allowed in _CREDENTIAL_ALLOWLIST:
+        data = data.replace(allowed, b"")
+    found = []
+    for pattern, kind in _CREDENTIAL_MARKERS:
+        if pattern.search(data) and kind not in found:
+            found.append(kind)
+    return found
+
+
+def scaffold_disclosures(scaffold: str | None) -> list[tuple[str, str]]:
+    """Things worth telling the user about a scaffold that is safe to copy.
+
+    Reports, never gates. Both routes below would move the recall number if they
+    withheld anything — a query naming an absent path is scored ``no_trigger``,
+    which counts, rather than ``error``, which does not — and both have a fix
+    that leaves the path and its bytes in place, so a report costs the user
+    nothing to act on.
+
+    Hard links are accounted by inode rather than by ``st_nlink`` alone: an
+    inode is only reported when its link count exceeds the number of names for
+    it *inside* the scaffold, which acquits a tree's own internal duplicates.
+    Regular files only. This rides the ``lstat`` the walk already performs —
+    measured 0.174s against a 0.175s baseline over 2,054 entries — and fired on
+    0 of 180,766 files across fourteen real trees. Never source it from
+    ``os.scandir``'s cached ``DirEntry.stat()``, which returns ``st_nlink == 0``
+    for every file on Windows and would disable the check silently.
+
+    Content is scanned once per run, never per probe: the whole-tree scan costs
+    3.1s once against 864s across a 300-probe loop, and threading does not help
+    because ``re`` holds the GIL. Two passes, because neither covers the other's
+    case — raw bytes, which reads cp1252 and other single-byte encodings a
+    decode-first scanner would skip on ``UnicodeDecodeError``, plus a UTF-16
+    decode when a BOM is present, which raw bytes miss entirely on NUL
+    interleaving. (Measured 2026-08-06, CPython 3.13.1 / Windows 10.)
+    """
+    if not scaffold:
+        return []
+    src = Path(scaffold)
+    if not src.is_dir():
+        return []
+
+    notices: list[tuple[str, str]] = []
+    by_inode: dict[tuple[int, int], list[str]] = {}
+    nlink: dict[str, int] = {}
+
+    for parent, dirnames, filenames in os.walk(src, topdown=True, followlinks=False):
+        here = Path(parent)
+        dirnames[:] = [n for n in sorted(dirnames) if _scaffold_exclusion(n) is None]
+        for name in sorted(filenames):
+            if _scaffold_exclusion(name) is not None:
+                continue
+            entry = here / name
+            rel = entry.relative_to(src).as_posix()
+            try:
+                info = entry.lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            if info.st_nlink > 1 and info.st_ino:
+                by_inode.setdefault((info.st_dev, info.st_ino), []).append(rel)
+                nlink[rel] = info.st_nlink
+            try:
+                with open(entry, "rb") as handle:
+                    data = handle.read(_CREDENTIAL_READ_BYTES + _CREDENTIAL_OVERLAP)
+            except OSError:
+                continue
+            kinds = _credential_markers_in(data)
+            if not kinds and data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+                try:
+                    kinds = _credential_markers_in(data.decode("utf-16", "ignore").encode("utf-8"))
+                except (UnicodeDecodeError, ValueError):
+                    kinds = []
+            for kind in kinds:
+                notices.append((rel, kind))
+
+    for names in by_inode.values():
+        inside = len(names)
+        for rel in names:
+            if nlink[rel] > inside:
+                notices.append(
+                    (rel, f"hard link: {nlink[rel]} names on disk, {inside} inside the scaffold")
+                )
+    return sorted(notices)
+
+
+def check_scaffold(scaffold: str | None) -> None:
+    """Refuse an unsafe scaffold, and say what a safe one still leaves out.
+
+    Both halves run once per invocation, before the spend projection. A refusal
+    raised from inside the copy instead arrives once per probe through
+    ``run_single_query``'s blanket handler, which records it as
+    ``status: "error"`` — indistinguishable from a rate limit or a dead harness,
+    and only after the user has been shown a bill and asked to approve it.
+
+    An exclusion is worse than that, because it produces no record at all. A
+    query naming an excluded path spends the tool budget hunting for it and is
+    scored a clean non-trigger, so silence here reads as a description that
+    failed to route. This is the last point where correcting it is free.
+    """
+    try:
+        excluded = validate_scaffold(scaffold)
+    except ScaffoldError as exc:
+        print(
+            f"Error: {exc}\n"
+            f"       Every probe workspace would then hold content from outside the\n"
+            f"       scaffold, and the probe subprocess runs inside that workspace.\n"
+            f"Fix:   remove that entry, replace it with a real file or directory, or\n"
+            f"       point --scaffold at a tree that contains neither.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if excluded:
+        width = max(len(path) for path, _ in excluded)
+        listing = "\n".join(f"  - {path.ljust(width)}  {reason}" for path, reason in excluded)
+        print(
+            f"Warning: {len(excluded)} path(s) in --scaffold {scaffold} are not copied "
+            f"into a probe workspace:\n"
+            f"{listing}\n"
+            f"         Every probe runs with its workspace as cwd, so a query naming one\n"
+            f"         of these finds nothing there and is scored a non-trigger. That\n"
+            f"         measures the scaffold, not the description. Move anything a query\n"
+            f"         is meant to resolve out from under these paths.",
+            file=sys.stderr,
+        )
+    disclosures = scaffold_disclosures(scaffold)
+    if disclosures:
+        width = max(len(path) for path, _ in disclosures)
+        listing = "\n".join(f"  - {path.ljust(width)}  {what}" for path, what in disclosures)
+        print(
+            f"Notice: {len(disclosures)} file(s) in --scaffold {scaffold} are copied into every\n"
+            f"        probe workspace and are worth a look first:\n"
+            f"{listing}\n"
+            f"        These are copied, not withheld, because withholding a path a query\n"
+            f"        names would score as a non-trigger. A marker match is far more often\n"
+            f"        a test fixture than a live credential, and a hard-link reading like\n"
+            f"        this is what a whole-tree backup (cp -al, rsync --link-dest) produces\n"
+            f"        for every file with nothing having entered the tree. Replacing either\n"
+            f"        with a real copy leaves the path and its bytes unchanged.",
+            file=sys.stderr,
+        )
+
+
 def _make_probe_root(scaffold: str | None) -> Path:
+    """A fresh temp project root, seeded from *scaffold* when one is given.
+
+    The scaffold is validated *before* ``mkdtemp``, deliberately.
+    ``run_single_query`` binds its ``probe_root`` local from this function's
+    return value, so raising once the directory exists leaves it registered but
+    unreleased until process exit. Refusing first means a rejected scaffold
+    creates nothing at all.
+    """
+    validate_scaffold(scaffold)
     root = Path(tempfile.mkdtemp(prefix=PROBE_ROOT_PREFIX))
     _register_root(root)
     if scaffold:
         src = Path(scaffold)
         for child in src.iterdir():
-            if child.name == ".claude":
+            if _scaffold_exclusion(child.name) is not None:
                 continue
             dest = root / child.name
             if child.is_dir():
-                shutil.copytree(child, dest)
+                shutil.copytree(child, dest, ignore=_copytree_ignore)
             else:
                 shutil.copy2(child, dest)
     (root / ".claude" / "commands").mkdir(parents=True, exist_ok=True)
@@ -894,11 +1413,32 @@ def run_eval(
     checked = [r for r in all_records if r.get("clone_registered") is not None]
     unregistered = [r for r in checked if r["clone_registered"] is False]
     competing = sorted({s for r in all_records for s in (r.get("competing_skills") or [])})
+    # Recomputed rather than threaded in from check_scaffold, because a library
+    # caller (run_loop, a notebook) never passes through main().
+    try:
+        scaffold_excluded = validate_scaffold(scaffold)
+    except ScaffoldError:
+        # Every probe already errored on this; the records carry the reason.
+        scaffold_excluded = []
     health: dict = {
         "probes_reporting_registration": len(checked),
         "probes_where_clone_was_not_registered": len(unregistered),
         "competing_installed_skills": competing,
+        "scaffold_exclusions": [
+            {"path": path, "reason": reason} for path, reason in scaffold_excluded
+        ],
+        "scaffold_disclosures": [
+            {"path": path, "note": note} for path, note in scaffold_disclosures(scaffold)
+        ],
     }
+    if scaffold_excluded:
+        names = ", ".join(path for path, _ in scaffold_excluded)
+        print(
+            f"WARNING: {len(scaffold_excluded)} path(s) in --scaffold were not copied "
+            f"into any probe workspace ({names}). A query that named one of them could "
+            f"not have resolved it, whatever the description said.",
+            file=sys.stderr,
+        )
     if unregistered:
         print(
             f"WARNING: in {len(unregistered)}/{len(checked)} probe(s) the command file "
@@ -1111,8 +1651,19 @@ def add_probe_arguments(parser: argparse.ArgumentParser) -> None:
                              "it changes model behaviour and so breaks comparability with "
                              "prior measurements.")
     parser.add_argument("--scaffold", default=None,
-                        help="Directory copied into each probe root (minus its .claude/) so "
-                             "file paths named in queries resolve. Default: empty root.")
+                        help="Directory copied into each probe root so file paths named in "
+                             "queries resolve. Whatever is copied must be a real file or "
+                             "directory: a symlink, junction or other reparse point is "
+                             "refused rather than followed, because copying one would put "
+                             "content from outside the tree in the probe's working "
+                             "directory. Version control, dependency trees, credential "
+                             "stores, dotenv files and .claude/ directories are left out "
+                             "instead of refused, and every path left out is listed before "
+                             "the run starts -- read that list, because a query naming one "
+                             "of them cannot resolve it and scores as a non-trigger. Files "
+                             "that are copied but carry a hard link or a credential-shaped "
+                             "string are named in the same place rather than withheld. "
+                             "Default: empty root.")
     parser.add_argument("--no-partial-messages", action="store_true",
                         help="Disable --include-partial-messages early detection. Detection "
                              "still works off the authoritative assistant events, so this "
@@ -1162,6 +1713,8 @@ def main():
         description = args.description or original_description
 
     print(f"Evaluating: {description}", file=sys.stderr)
+
+    check_scaffold(args.scaffold)
 
     project_spend(
         n_queries=len(eval_set),
