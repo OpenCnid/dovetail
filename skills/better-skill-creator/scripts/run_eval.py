@@ -143,20 +143,23 @@ DEFAULT_COST_PER_PROBE_USD = 0.20
 # a constant rather than a fraction of the eval set because the thing it must not
 # scale with is exactly the eval set.
 #
-# The cushion buys nothing measurable here, and is kept anyway. Sweeping 0, 1, 2,
-# 3, 4, 8 and 16 at 4, 16 and 32 workers against 50 ms fake probes put every value
-# within +/-0.4% of the unbounded driver at >=92% utilisation -- and 50 ms is some
-# 1200x more adverse than the 60-120 s a real probe takes, so at the real duration
-# the hand-off is unmeasurable by construction. What it costs is visible instead:
-# in steady state the jobs sitting in the pool's queue are exactly the ones a
-# worker can still pick up while `cleanup_owned` is running, so a Ctrl-C strands
-# `min(this, num_workers)` billed sessions -- 0 at buffer 0, 2 at this value,
-# against 9 measured for the unbounded driver at 8 workers. That price belongs to
-# the swallowed-SIGINT defect described at `max_outstanding` below, not to the
-# cushion, and setting this to 0 would be tuning around that bug instead of
-# fixing it. Revisit when the interrupt path is repaired: nothing pins the value,
-# and the suite passes at 0, 1, 2 and 7.
-# (Measured 2026-08-06, CPython 3.13.1, Windows 10 10.0.19045, fake worker.)
+# The cushion buys nothing measurable. Sweeping 0, 1, 2, 3, 4, 8 and 16 at 4, 16
+# and 32 workers against 50 ms fake probes put every value within +/-0.4% of the
+# unbounded driver at >=92% utilisation -- and 50 ms is some 1200x more adverse
+# than the 60-120 s a real probe takes, so at the real duration the hand-off is
+# unmeasurable by construction. Nothing pins the value; the suite passes at 0, 1,
+# 2 and 7.
+#
+# It did cost something once. While a Ctrl-C was still swallowed, the jobs sitting
+# in the pool's queue were exactly the ones a freed worker could still pick up
+# while `cleanup_owned` ran, so an interrupt stranded `min(this, num_workers)`
+# billed sessions -- against 9 measured for the unbounded driver at 8 workers.
+# `_INTERRUPTED` closed that: a worker that dequeues after the flag is up records
+# `interrupted` instead of launching. The cushion is now free on both sides, and 2
+# stands for want of a reason to move it.
+# (Measured 2026-08-06, CPython 3.13.1, Windows 10 10.0.19045, fake worker. The
+# orphan counts are from before the `_INTERRUPTED` fix and are kept as the record
+# of what the window was worth on its own.)
 OUTSTANDING_JOB_BUFFER = 2
 
 _TERMINAL = object()
@@ -1617,16 +1620,17 @@ def run_eval(
     # to bound this, and it is named here at its real size so nobody re-derives a
     # larger one.
     #
-    # The queue depth also decided how much money a Ctrl-C could still spend. The
-    # pool's workers keep draining while `cleanup_owned` kills the children it
-    # snapshotted, and each worker that frees up starts the next queued job --
-    # a fresh billed session, registered after the snapshot, so neither killed nor
-    # cleaned. With the whole set queued that tail was bounded only by how long
-    # cleanup took; with the window bounded there are at most
-    # OUTSTANDING_JOB_BUFFER jobs left to start at all. That is a bound on the
-    # leak and not a repair of it: the interrupt still never reaches the
-    # cancellation path below, because `install_cleanup_handlers` has already
-    # replaced the handler that would have raised KeyboardInterrupt.
+    # The queue depth also decided how much money a Ctrl-C could still spend, back
+    # when one could. The pool's workers keep draining while `cleanup_owned` kills
+    # the children it snapshotted, and each worker that frees up starts the next
+    # queued job -- a fresh billed session, registered after the snapshot, so
+    # neither killed nor cleaned. With the whole set queued that tail was bounded
+    # only by how long cleanup took, and measured 9 sessions at 8 workers;
+    # bounding the window cut it to OUTSTANDING_JOB_BUFFER, and `_INTERRUPTED`
+    # then cut it to none, since the flag goes up before the shutdown and stops a
+    # worker that has already dequeued its job -- which `cancel_futures` cannot
+    # reach. The window is no longer what holds that line. It is why there was so
+    # little left to hold by the time the flag was added.
     max_outstanding = num_workers + OUTSTANDING_JOB_BUFFER
 
     executor = ThreadPoolExecutor(max_workers=num_workers)
