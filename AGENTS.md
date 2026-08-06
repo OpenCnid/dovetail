@@ -258,6 +258,31 @@ compared against nothing here either. `claude plugin tag` refuses to tag when
 `plugin.json` and a `strict: true` marketplace entry disagree, so that one has a
 second reader; `source` had none.
 
+**Check 1 had a hole of a different kind: it graded whatever the commit told it
+to.** `.version-bump.json` is read out of `$SHA`, which is right — that file
+describes that commit's manifests — and the consequence is that the commit
+chooses the syllabus it is examined on. A commit narrowing the list to
+`.claude-plugin/plugin.json` alone gets `manifests agree with each other` out of
+a `--check` that compared one field with itself, while `plugin.json` says one
+version and the marketplace entry says another. That is exactly the
+disagreement this whole apparatus exists to catch, on the `strict: true` entry
+installers read, and it does not take a hostile commit — deleting a line from a
+JSON list while debugging a bump, and committing it, gets there. The list still
+comes from the commit, because a commit that *adds* a manifest should be graded
+on it; it is now held to a **floor** of the three `<path> <field>` pairs, which
+it may not drop below.
+
+That floor is written into `check-release.sh` rather than read from the
+checkout's own `.version-bump.json`, and the reason is the false-negative
+direction above: the checkout's list is today's, and reading it would make every
+manifest added after a release retroactively missing from that release, so a
+published tag would stop verifying from a checkout that had moved on. The cost
+is that adding a manifest to `.version-bump.json` needs no edit to the gate,
+while removing one is meant to need one. `scripts/test-release-check.sh` builds
+the narrowed commit with `bump-version.sh` itself, over the list it was just
+handed, so the fixture is the reachable shape rather than a hand-built
+disagreement.
+
 **Two reads from the checkout survive, deliberately.** The pack name is read
 there once, before any commit is resolved, because parsing the tag needs a name
 and there is nothing else to take one from yet — that is a shape test against

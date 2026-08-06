@@ -1005,19 +1005,35 @@ git -C "$ESCAPE_FIXTURE" -c init.defaultBranch=main init -q
 git -C "$ESCAPE_FIXTURE" symbolic-ref HEAD refs/heads/main
 git -C "$ESCAPE_FIXTURE" config core.autocrlf false
 
-# Commits a `.version-bump.json` listing `$1` as its one path. HEAD stays on
-# `main`'s tip and the notes and manifests are this pack's own -- including the
-# marketplace entry, which check 3 reads regardless of this list -- so check 1 is
-# the only check that can fail below, which is what makes the exit code mean one
-# specific thing. `newline="\n"` for the reason bump-version.sh uses it: the
-# fixture sets `core.autocrlf false`, and a CRLF manifest is a file that never
-# matches its commit.
+# Commits a `.version-bump.json` naming `$1` alongside the fields check 1's
+# floor requires. HEAD stays on `main`'s tip and the notes and manifests are this
+# pack's own -- including the marketplace entry, which check 3 reads regardless
+# of this list -- so check 1 is the only check that can fail below, which is what
+# makes the exit code mean one specific thing.
+#
+# The floor is why this list is not `$1` alone, and the reason is the section
+# further down: a commit does not get to narrow what check 1 grades, and a
+# fixture listing one field would be refused for narrowing rather than for the
+# path it is here to test. Adding the hostile path to a whole list keeps the
+# traversal the only thing wrong with it -- and the control, whose path is
+# already on the floor, adds nothing and has to pass.
+#
+# `newline="\n"` for the reason bump-version.sh uses it: the fixture sets
+# `core.autocrlf false`, and a CRLF manifest is a file that never matches its
+# commit.
 escape_commit() {
   "$PYJSON" - "$ESCAPE_FIXTURE/.version-bump.json" "$1" <<'PY'
 import json, sys
 path, listed = sys.argv[1], sys.argv[2]
+files = [
+    {"path": ".claude-plugin/plugin.json", "field": "version"},
+    {"path": ".claude-plugin/marketplace.json", "field": "plugins.0.version"},
+    {"path": ".claude-plugin/marketplace.json", "field": "metadata.version"},
+]
+if listed not in {entry["path"] for entry in files}:
+    files.append({"path": listed, "field": "version"})
 with open(path, "w", newline="\n") as f:
-    json.dump({"files": [{"path": listed, "field": "version"}]}, f, indent=2)
+    json.dump({"files": files}, f, indent=2)
     f.write("\n")
 PY
   git -C "$ESCAPE_FIXTURE" add -A
@@ -1244,6 +1260,145 @@ elif [ "$rc" -ne 0 ]; then
   fail=1
 else
   note ok "$REPOINTED_TAG — the entry pointing at this repository still passes"
+fi
+
+# ------------------------- the commit narrows the list check 1 reads from it
+# Check 1 delegates to `bump-version.sh --check`, which compares every field
+# `.version-bump.json` names. `snapshot_manifests` reads that file out of `$SHA`
+# -- correctly, since it describes that commit's manifests -- and the
+# consequence is that the commit under test chooses the syllabus it is examined
+# on. Cut the list to `.claude-plugin/plugin.json` alone and `--check` compares
+# one field with itself, agrees, and check 1 prints `manifests agree with each
+# other` over manifests that do not.
+#
+# This file has been using that narrowing as a convenience rather than treating
+# it as a hazard: the pack-name section above leans on `.version-bump.json`
+# listing version fields alone to keep check 1 quiet while check 2 does the
+# discriminating. Same mechanism, one step further, and it stops being a
+# technique.
+#
+# What it costs is the whole of `bump-version.sh`'s reason to exist. The
+# marketplace entry carries `strict: true` and is what installers read; a
+# `plugin.json` saying one version beside a marketplace entry saying another is
+# the disagreement the tool was written to catch, and `claude plugin tag`
+# refuses to tag on it. Measured before the fix, in this fixture's shape: exit 0
+# and five `ok`s, one of them the agreement of a set of one.
+#
+# Not a hostile-commit story especially. Deleting a line from a JSON list while
+# debugging a bump, and committing it, gets there.
+echo
+echo "behaviour — the commit narrows the list check 1 reads from it"
+
+NARROWED_VERSION="4.4.4"
+NARROWED_TAG="${PACK}--v$NARROWED_VERSION"
+
+# The list, cut to the one manifest that is about to move.
+cat > "$FIXTURE/.version-bump.json" <<'JSON'
+{
+  "files": [
+    { "path": ".claude-plugin/plugin.json", "field": "version" }
+  ]
+}
+JSON
+
+# Bumped with the pack's own tool over the list it was just handed, which is
+# what makes this the reachable shape rather than a hand-built disagreement:
+# `bump-version.sh` moves what the list names, so plugin.json goes to 4.4.4 and
+# the marketplace entry keeps the version before it.
+bash "$FIXTURE/scripts/bump-version.sh" "$NARROWED_VERSION" >/dev/null
+printf '\n## v%s (2026-08-06)\n\nBumped over a list of one.\n' "$NARROWED_VERSION" >> "$FIXTURE/RELEASE-NOTES.md"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "bump over a narrowed list"
+NARROWED="$(git -C "$FIXTURE" rev-parse HEAD)"
+NARROWED_SHORT="$(git -C "$FIXTURE" rev-parse --short "$NARROWED")"
+git -C "$FIXTURE" tag "$NARROWED_TAG" "$NARROWED"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$NARROWED"
+
+# This section's canary, and it needs both halves. A commit whose manifests
+# happened to agree would pass every assertion below by being a valid release,
+# and a list that was never narrowed would leave check 1 catching the
+# disagreement the ordinary way — either one turns the chain below into a test
+# of something else that also exits 1.
+NARROWED_LISTED="$(git -C "$FIXTURE" show "$NARROWED:.version-bump.json" \
+  | "$PYJSON" -c 'import json,sys;print(len(json.load(sys.stdin)["files"]))')"
+NARROWED_PLUGIN="$(git -C "$FIXTURE" show "$NARROWED:.claude-plugin/plugin.json" \
+  | "$PYJSON" -c 'import json,sys;print(json.load(sys.stdin)["version"])')"
+NARROWED_MARKET="$(git -C "$FIXTURE" show "$NARROWED:.claude-plugin/marketplace.json" \
+  | "$PYJSON" -c 'import json,sys;print(json.load(sys.stdin)["plugins"][0]["version"])')"
+
+if [ "$NARROWED_LISTED" = "1" ] && [ "$NARROWED_PLUGIN" != "$NARROWED_MARKET" ]; then
+  note ok "fixture: $NARROWED_SHORT lists $NARROWED_LISTED version field and says $NARROWED_PLUGIN against the marketplace entry's $NARROWED_MARKET"
+else
+  note FAIL "fixture: $NARROWED_SHORT lists $NARROWED_LISTED fields, plugin $NARROWED_PLUGIN, marketplace $NARROWED_MARKET — the assertions below prove nothing"
+  fail=1
+fi
+
+# The second leg is the symptom itself, in the wording check 1 passes in.
+# Reverting to a check 1 that grades only the commit's own list lands there
+# rather than only on the exit code. The third makes check 1 the sole
+# discriminator: the tag names the version `plugin.json` carries, so check 2
+# agrees, and nothing else here has an opinion about a marketplace version.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$NARROWED_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $NARROWED_TAG at $NARROWED_SHORT"; then
+  note FAIL "$NARROWED_TAG — did not grade the tagged commit ($NARROWED_SHORT)"
+  fail=1
+elif printf '%s\n' "$out" | grep -qF "manifests agree with each other"; then
+  note FAIL "$NARROWED_TAG — a list of one was graded as manifests agreeing"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "the commit's manifests carry $NARROWED_VERSION"; then
+  note FAIL "$NARROWED_TAG — check 2 failed too; the exit code below would not be check 1's"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "$NARROWED_TAG — exit $rc, expected 1 ($NARROWED_SHORT says $NARROWED_PLUGIN and $NARROWED_MARKET at once)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF ".claude-plugin/marketplace.json plugins.0.version"; then
+  note FAIL "$NARROWED_TAG — refused without naming the field the commit's list dropped"
+  fail=1
+else
+  note ok "$NARROWED_TAG — refused: the commit does not get to choose what check 1 reads"
+fi
+
+# HEAD mode asks it too, and this is where it would be caught in practice: the
+# narrowing lands on `main`, and the pre-flight is what runs next.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+
+if [ "$rc" -ne 1 ]; then
+  note FAIL "--head — exit $rc, expected 1 (HEAD's list covers one manifest of two)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF ".claude-plugin/marketplace.json plugins.0.version"; then
+  note FAIL "--head — refused without naming the field HEAD's list dropped"
+  fail=1
+else
+  note ok "--head — the pre-flight refuses it too, before there is a tag to blame"
+fi
+
+# The control, and the reason the two above are about the list rather than about
+# 4.4.4. Put the whole list back, bump over it so the marketplace entry catches
+# up, and move the tag: same version, same tag name, and it passes.
+cp .version-bump.json "$FIXTURE/.version-bump.json"
+bash "$FIXTURE/scripts/bump-version.sh" "$NARROWED_VERSION" >/dev/null
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "bump over the whole list"
+WHOLE_LIST="$(git -C "$FIXTURE" rev-parse HEAD)"
+WHOLE_LIST_SHORT="$(git -C "$FIXTURE" rev-parse --short "$WHOLE_LIST")"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$WHOLE_LIST"
+git -C "$FIXTURE" tag -d "$NARROWED_TAG" >/dev/null
+git -C "$FIXTURE" tag "$NARROWED_TAG" "$WHOLE_LIST"
+
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$NARROWED_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $NARROWED_TAG at $WHOLE_LIST_SHORT"; then
+  note FAIL "$NARROWED_TAG — list restored, but the tag no longer resolves to $WHOLE_LIST_SHORT"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "manifests agree with each other"; then
+  note FAIL "$NARROWED_TAG — the whole list is back and check 1 still does not agree"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "$NARROWED_TAG — list restored, $WHOLE_LIST_SHORT still does not pass (exit $rc)"
+  fail=1
+else
+  note ok "$NARROWED_TAG — the whole list back, the same version passes"
 fi
 
 echo

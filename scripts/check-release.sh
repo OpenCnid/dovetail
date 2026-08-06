@@ -47,7 +47,9 @@
 #
 # Six checks, in the order that gives the most useful failure first:
 #
-#   1. the manifests agree with each other        (bump-version.sh --check)
+#   1. the manifests agree with each other,       (bump-version.sh --check, over
+#      over a list the commit does not get to      a list read out of the commit
+#      narrow                                      but held to a floor)
 #   2. they spell out the tag: both the pack name (a tag that says 0.4.1 and
 #      and the version it carries                  installs 0.4.0 is worse than
 #                                                  no tag -- and so is one that
@@ -129,6 +131,19 @@
 # green, exit 0. Check 2's "installs another pack entirely" one field further
 # over, and the only one of these where the tag is not even lying -- the name
 # and the version are this pack's, and the repository behind them is not.
+#
+# Check 1 had a hole of a different kind: it graded whatever the commit told it
+# to. `snapshot_manifests` reads `.version-bump.json` out of `$SHA`, which is
+# right -- that file describes that commit's manifests -- and the consequence is
+# that the commit chooses its own syllabus. Cut the list to
+# `.claude-plugin/plugin.json` alone and `--check` compares one field with
+# itself, agrees, and check 1 says `manifests agree with each other` while
+# `plugin.json` says one version and the marketplace entry says another. That is
+# precisely the disagreement `bump-version.sh` was written to catch, on the
+# entry carrying `strict: true` that installers read. The list still comes from
+# the commit, because a commit that adds a manifest should be graded on it; it
+# is now held to a floor it may not drop below. See it below for why the floor
+# is written out rather than read from the checkout.
 #
 # Two reads from the checkout survive on purpose. `scripts/bump-version.sh` is
 # copied rather than taken from the commit -- see check 1 -- and the pack name is
@@ -438,9 +453,10 @@ echo
 # manifests. The script that reads the list is copied from the checkout: it is
 # the tool rather than the data, and running a `bash` script out of whichever
 # commit a tag happens to name is a larger promise than this gate needs to make.
-# A commit whose list the current tool cannot read fails as a disagreement,
-# which is the safe direction and says `.version-bump.json is stale` when run
-# by hand.
+# A commit whose list the current tool cannot read snapshots nothing and is
+# caught by the floor below, which names the fields that went unread -- a better
+# answer than the disagreement it used to be reported as, and the same safe
+# direction.
 snapshot_manifests() {
   local path
   snapshot .version-bump.json || return 1
@@ -459,21 +475,80 @@ snapshot_manifests() {
     "$SNAPSHOT/.version-bump.json" 2>/dev/null)
 }
 
-if snapshot_manifests && bash "$SNAPSHOT/scripts/bump-version.sh" --check >/dev/null 2>&1; then
-  note ok "manifests agree with each other"
-# A refused path is not a disagreement, and reporting it as one sends the reader
-# to `bump-version.sh --check` -- which reads the list on disk, where the path is
-# fine, and passes. Nothing about the manifests was read here: the run stopped at
-# the list itself. Say which path, because that is the whole of the repair.
-elif [ -n "$SNAPSHOT_REFUSED" ]; then
-  note FAIL ".version-bump.json names a path outside the tree: $SNAPSHOT_REFUSED"
+# Reading the list from the commit hands the commit its own syllabus, though.
+# `--check` compares the fields it is given, so a commit that cuts the list to
+# `.claude-plugin/plugin.json` alone gets `manifests agree with each other` from
+# a comparison of one field with itself -- while `plugin.json` says one version
+# and the marketplace entry says another. That entry carries `strict: true` and
+# is what an installer reads; a disagreement there is the whole of what
+# `bump-version.sh` exists to catch, and `claude plugin tag` refuses to tag on
+# it. The list still comes from the commit, because a commit that *adds* a
+# manifest should be graded on it. What it may not do is drop one.
+#
+# So: a floor, not the list. Written out here rather than read from the
+# checkout's own `.version-bump.json`, because the checkout's list is today's
+# and this has to hold for tags cut before today. Every manifest added after a
+# release would otherwise be retroactively missing from that release, and a
+# published tag would stop verifying from a checkout that had moved on -- the
+# false negative this gate has already been bitten by once, in the other
+# direction.
+#
+# These three have been the whole of `.version-bump.json` since it was
+# introduced (edd411b, the first commit in this repository; verified
+# 2026-08-06 by `git log --follow`, which reports that one commit). Adding a
+# manifest needs no edit here. Removing one is meant to.
+REQUIRED_VERSION_FIELDS=(
+  ".claude-plugin/plugin.json version"
+  ".claude-plugin/marketplace.json plugins.0.version"
+  ".claude-plugin/marketplace.json metadata.version"
+)
+
+# The required pairs the commit's list does not name, one per line, empty when
+# it names them all. A list that cannot be read covers nothing and prints all of
+# them, which is both the true answer and the safe one -- and it keeps a
+# malformed `.version-bump.json` from arriving here as silence.
+uncovered_version_fields() {
+  "$PY" - "$SNAPSHOT/.version-bump.json" "${REQUIRED_VERSION_FIELDS[@]}" <<'PY' | tr -d '\r'
+import json, sys
+
+path, required = sys.argv[1], sys.argv[2:]
+try:
+    listed = {f"{e['path']} {e['field']}" for e in json.load(open(path))["files"]}
+except Exception:
+    listed = set()
+print("\n".join(field for field in required if field not in listed))
+PY
+}
+
+if ! snapshot_manifests; then
+  # A refused path is not a disagreement, and reporting it as one sends the
+  # reader to `bump-version.sh --check` -- which reads the list on disk, where
+  # the path is fine, and passes. Nothing about the manifests was read here: the
+  # run stopped at the list itself. Say which path, because that is the whole of
+  # the repair.
+  if [ -n "$SNAPSHOT_REFUSED" ]; then
+    note FAIL ".version-bump.json names a path outside the tree: $SNAPSHOT_REFUSED"
+  else
+    # Named with the commit, because the copy on disk is a different file and
+    # `--check` on it may well pass while this one fails -- that gap is the bug
+    # this section was rewritten for.
+    note FAIL "manifests disagree at $(git rev-parse --short "$SHA") — run: bash scripts/bump-version.sh --check"
+  fi
   fail=1
 else
-  # Named with the commit, because the copy on disk is a different file and
-  # `--check` on it may well pass while this one fails -- that gap is the bug
-  # this section was rewritten for.
-  note FAIL "manifests disagree at $(git rev-parse --short "$SHA") — run: bash scripts/bump-version.sh --check"
-  fail=1
+  UNCOVERED="$(uncovered_version_fields)"
+  if [ -n "$UNCOVERED" ]; then
+    # Its own verdict rather than a disagreement, because it is a different
+    # repair: nothing here disagrees with anything, and the reader sent to
+    # `bump-version.sh --check` would find it passing.
+    note FAIL ".version-bump.json at $(git rev-parse --short "$SHA") does not list ${UNCOVERED//$'\n'/, } — check 1 grades only what that file names"
+    fail=1
+  elif bash "$SNAPSHOT/scripts/bump-version.sh" --check >/dev/null 2>&1; then
+    note ok "manifests agree with each other"
+  else
+    note FAIL "manifests disagree at $(git rev-parse --short "$SHA") — run: bash scripts/bump-version.sh --check"
+    fail=1
+  fi
 fi
 
 if [ "$HEAD_MODE" -eq 1 ]; then
