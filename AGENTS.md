@@ -185,6 +185,16 @@ could reach the bug — a tag push checks the tag out, so there the tree *was* t
 commit — which is how it lasted; the documented local form reached it, and HEAD
 mode reached it from uncommitted edits alone.
 
+The split refused good releases as readily as it blessed bad ones, and that half
+needed no work in progress at all — only a clone that had moved on. Verifying
+`dovetail--v0.4.1` from a tree carrying 0.4.2 reported `tag says 0.4.1, the
+commit's manifests say 0.4.2` about `313b9e4`, whose own manifests say 0.4.1 and
+always did (measured 2026-08-06 with check 2's version read pointed back at the
+working tree; the wording is today's, the verdict is the one that shipped before
+this was fixed). Reading the version out of the commit is what makes a published
+tag verifiable from a checkout that has since moved past it — which is most
+checkouts, most of the time.
+
 `release.yml` picks the mode from `github.event_name`, not from `ref_type`: a
 dispatch launched from a tag ref reports `ref_type: tag` too, so `ref_type`
 cannot tell a dispatch from a push.
@@ -204,9 +214,10 @@ throwaway repository it builds with a tag, a later commit on `main`, and a
 working tree bumped to a version neither commit carries, so the two answers are
 different commits, the tagged one is an ancestor HEAD mode must refuse while
 explicit-tag mode must not, and each remaining wrong answer is a different
-version — and runs in
-`checks`; if you add a workflow, it will also tell you if a `run:` body reads an
-attacker-nameable context.
+version — including the pass direction, where that bump is committed and the
+older tag still has to verify against it. It runs in `checks`; if you add a
+workflow, it will also tell you if a `run:` body reads an attacker-nameable
+context.
 
 A published tag is a thing other people have installed. When it is wrong, the
 fix is a new version, not a moved tag.
