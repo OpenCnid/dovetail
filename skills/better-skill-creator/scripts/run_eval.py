@@ -1464,8 +1464,15 @@ def run_eval(
         errored = [r for r in records if r["status"] == "error"]
         triggers = sum(1 for r in valid if r["triggered"])
         for r in records:
-            if isinstance(r.get("cost_usd"), float):
-                total_cost += r["cost_usd"]
+            # Mirror the read site in run_single_query, which accepts (int, float).
+            # A bare `float` check silently drops an integer-valued cost from a
+            # record this function did not produce, and if that were the only cost
+            # present the summary would report None -- "nobody reported a cost" --
+            # for a run that was billed. bool is excluded because it is an int
+            # subclass and a boolean cost is meaningless.
+            cost = r.get("cost_usd")
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                total_cost += float(cost)
                 have_cost = True
 
         should_trigger = item["should_trigger"]
