@@ -13,8 +13,12 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 
 # The skill ships at <repo>/skills/better-skill-creator/ so Claude Code's plugin loader
-# auto-discovers it via the skills/*/SKILL.md glob. README, LICENSE.txt and NOTICE are
-# repository furniture and stay at the repository root, two levels above the skill root.
+# auto-discovers it via the skills/*/SKILL.md glob. The README is repository furniture and
+# stays at the repository root, two levels up. LICENSE.txt and NOTICE deliberately do not:
+# install.sh copies this directory into ~/.claude/skills/<name>/, and a root file does not
+# travel with a copied directory, so the Apache-2.0 terms this skill is derived under have
+# to sit inside the skill root to reach the installed copy. The root LICENSE.md is a
+# different licence (CC BY 4.0) covering repository prose, and does not stand in for them.
 REPO_ROOT = SKILL_ROOT.parent.parent
 
 # Claude Code re-attaches roughly the first 19,900 CHARACTERS of an invoked skill after
@@ -217,10 +221,15 @@ class ProvenanceIsIntact(unittest.TestCase):
 
     def test_license_and_notice_present(self):
         for name in ("LICENSE.txt", "NOTICE"):
-            self.assertTrue((REPO_ROOT / name).is_file(), f"{name} is missing")
+            self.assertTrue(
+                (SKILL_ROOT / name).is_file(),
+                f"{name} is missing from the skill root. It has to live here rather than at "
+                "the repository root: installing copies this directory, and a root file does "
+                "not come with it, so the installed skill would carry no licence at all.",
+            )
 
     def test_notice_names_the_upstream_and_disclaims_affiliation(self):
-        notice = read(REPO_ROOT / "NOTICE")
+        notice = read(SKILL_ROOT / "NOTICE")
         self.assertIn("anthropics/skills", notice)
         self.assertIn("Apache", notice)
         self.assertRegex(
