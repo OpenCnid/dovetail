@@ -38,6 +38,15 @@ releases.
   bytecode. Removed, and `.gitignore` now covers them.
 - **The README was rewritten for the reader who just wants it installed,** with
   the two routes at the top and the reasoning behind them moved below.
+- **It has the diagram it has been claiming since `0.4.0`.** `docs/assets/
+  banner.svg` draws the pack in three tiers: what each skill gives you alone,
+  what a group unlocks that no member can, and the eight cut as the through
+  dovetail the pack is named for, tails coloured in runs of two, three and three
+  by group. The middle tier labels each panel with how well it is evidenced
+  rather than asserting the same weight for all three — the gate is counted (2
+  descriptions, 3 bodies, the house rule), the clean room is a mechanism
+  (`self-play` imports both by name), and the third is drawn dashed because it
+  is shared purpose with no import in either direction.
 
 Suite after the fixes: 699 passed on Windows, 691 on Linux, 0 failed.
 
