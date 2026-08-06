@@ -48,9 +48,11 @@
 # Five checks, in the order that gives the most useful failure first:
 #
 #   1. the manifests agree with each other        (bump-version.sh --check)
-#   2. they carry the version in the tag name     (a tag that says 0.4.1 and
-#                                                  installs 0.4.0 is worse than
-#                                                  no tag)
+#   2. they spell out the tag: both the pack name (a tag that says 0.4.1 and
+#      and the version it carries                  installs 0.4.0 is worse than
+#                                                  no tag -- and so is one that
+#                                                  says `dovetail` and installs
+#                                                  another pack entirely)
 #   3. RELEASE-NOTES.md has an entry for it
 #   4. the commit is on `main`                    (nothing ships off a branch --
 #                                                  and where that commit is HEAD
@@ -101,10 +103,28 @@
 # out of the commit now, through `git show`, and uncommitted work is reported
 # rather than graded -- an installer never receives it.
 #
+# That fix moved the version and left the pack *name* behind, and the same shape
+# came back one field over. Check 2 compared only the version, and `$PLUGIN` was
+# read off the checkout, so `dovetail--v8.8.8` at a commit whose manifests say
+# `otherpack` matched on the only half anybody looked at -- and checks 1, 3 and 4
+# have no opinion about which pack they are reading. Four `ok`s for a tag that
+# installs somebody else's pack. Check 2 now grades the whole tag, both halves
+# out of `$SHA`, and HEAD mode builds the name it checks from the commit too:
+# built from the checkout, an uncommitted rename pointed the already-released
+# check at a pack with no tags and turned a `FAIL` into a `SKIP`.
+#
+# Two reads from the checkout survive on purpose. `scripts/bump-version.sh` is
+# copied rather than taken from the commit -- see check 1 -- and the pack name is
+# read there once, to parse the tag before there is a commit to read it from.
+# That one is a shape test, not the name check; the name check is check 2, and it
+# reads `$SHA`. So the narrow true statement is that no file the checks *grade*
+# comes off the disk, rather than that the disk is never opened.
+#
 # Before any of them, the tag has to be a tag this pack could have issued:
-# `<plugin>--v<major>.<minor>.<patch>`, optionally `-<prerelease>`. Anything
-# else exits 2 without reading a manifest or touching git. See the block above
-# the check for why a release gate validates the shape of its own input.
+# `<plugin>--v<major>.<minor>.<patch>`, optionally `-<prerelease>`. Anything else
+# exits 2 without touching git. It does read the checkout's manifest first, for
+# the name to compare against -- the one file opened before the shape is checked.
+# See the block above the check for why a release gate validates its own input.
 #
 # Usage:
 #   bash scripts/check-release.sh                     # HEAD, as the tag the
@@ -178,27 +198,37 @@ PLUGIN="$("$PY" -c 'import json;print(json.load(open(".claude-plugin/plugin.json
 VERSION_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
 
 reject_tag() {
-  echo "not a $PLUGIN release tag: $1" >&2
-  echo "expected ${PLUGIN}--v<major>.<minor>.<patch>[-prerelease]" >&2
+  echo "not a $2 release tag: $1" >&2
+  echo "expected ${2}--v<major>.<minor>.<patch>[-prerelease]" >&2
   exit 2
 }
 
-# Sets `$VERSION` from `$TAG`, or exits 2. The two modes reach it from opposite
-# directions: explicit-tag mode before the name has been anywhere near git, HEAD
-# mode after it has built the name out of the commit's own manifests -- where a
-# version that cannot be a version means a stale or hand-edited manifest rather
-# than a hostile push, and refusing is still the answer.
+# Sets `$VERSION` from `$TAG`, or exits 2. `$1` is the pack name the tag has to
+# carry, and the two modes supply it from opposite places for the same reason
+# each supplies its subject from where it does. Explicit-tag mode passes the
+# checkout's name, because the tag has to parse before there is a resolved
+# commit to read a name out of -- and a shape this pack could never have issued
+# is refused there, before any commit is graded. HEAD mode passes the name out
+# of the commit it already resolved, because by then there is one, and a version
+# that cannot be a version means a stale or hand-edited manifest rather than a
+# hostile push -- refusing is still the answer.
+#
+# Parsing against the checkout's name is a shape test, not the name check. That
+# one cannot happen here, because the commit is not resolved yet; it is check 2,
+# below, and it is what stops a tag naming one pack being blessed at another
+# pack's commit.
 parse_tag() {
+  local expect="$1"
   case "$TAG" in
-    *[!A-Za-z0-9.-]*) reject_tag "$TAG" ;;
-    "${PLUGIN}--v"*)  VERSION="${TAG#"${PLUGIN}--v"}" ;;
-    *)                reject_tag "$TAG" ;;
+    *[!A-Za-z0-9.-]*) reject_tag "$TAG" "$expect" ;;
+    "${expect}--v"*)  VERSION="${TAG#"${expect}--v"}" ;;
+    *)                reject_tag "$TAG" "$expect" ;;
   esac
 
-  [[ "$VERSION" =~ $VERSION_RE ]] || reject_tag "$TAG"
+  [[ "$VERSION" =~ $VERSION_RE ]] || reject_tag "$TAG" "$expect"
 }
 
-[ "$HEAD_MODE" -eq 1 ] || parse_tag
+[ "$HEAD_MODE" -eq 1 ] || parse_tag "$PLUGIN"
 
 # The mode decides the subject, and HEAD mode decides it without consulting
 # `refs/tags/` at all. That unconditional `git rev-parse HEAD` is the fix: the
@@ -259,23 +289,42 @@ snapshot() {
 }
 
 # The one snapshot failure that is not a check failing. Everything below reads a
-# version, so a commit with no manifest is not an unreleasable commit -- it is
-# not this pack, and there is no verdict to give about it.
+# name and a version, so a commit with no manifest is not an unreleasable commit
+# -- it is not this pack, and there is no verdict to give about it.
+#
+# Both fields come out in one read, because they are one fact: the release tag
+# this commit says it is. `name` used to be taken from the checkout and only
+# `version` from here, which is what let a tag naming one pack pass at another
+# pack's commit -- see check 2.
 if ! snapshot .claude-plugin/plugin.json ||
-   ! MANIFEST_VERSION="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' \
+   ! MANIFEST_ID="$("$PY" -c 'import json,sys;m=json.load(open(sys.argv[1]));print(m["name"],m["version"])' \
        "$SNAPSHOT/.claude-plugin/plugin.json" 2>/dev/null)"; then
   echo "no readable .claude-plugin/plugin.json at $(git rev-parse --short "$SHA")" >&2
   echo "this gate grades a commit, and that commit does not carry this pack's manifest" >&2
   exit 2
 fi
 
+# One line, two fields, so command substitution's trailing-newline strip covers
+# the CRLF that Python's text mode writes on Windows -- the translation the loop
+# further down has to undo by hand, because reading line by line does not.
+MANIFEST_NAME="${MANIFEST_ID%% *}"
+MANIFEST_VERSION="${MANIFEST_ID##* }"
+
 # HEAD mode still needs a tag *name* -- checks 2 and 3 grade a version string,
-# and the version HEAD would ship is the one HEAD's own manifests carry, which
-# is why this waits for the snapshot instead of reading the copy on disk. Naming
-# a tag is not resolving one, and HEAD mode still resolves none.
+# and the tag HEAD would ship is the one HEAD's own manifests spell out, both
+# halves of it, which is why this waits for the snapshot instead of reading the
+# copy on disk. Naming a tag is not resolving one, and HEAD mode resolves none
+# to pick its subject: the only tag it looks up is this name, and only to ask
+# whether the version is already out.
+#
+# The name comes from `$SHA` for the same reason the version does. Built from
+# the checkout, an uncommitted rename renamed what HEAD "would ship", and the
+# already-released check below then went looking under a pack name that has
+# never released anything and reported that it could not tell -- the one check
+# the mode exists for, switched off by an unsaved edit.
 if [ "$HEAD_MODE" -eq 1 ]; then
-  TAG="${PLUGIN}--v${MANIFEST_VERSION}"
-  parse_tag
+  TAG="${MANIFEST_NAME}--v${MANIFEST_VERSION}"
+  parse_tag "$MANIFEST_NAME"
   echo "$ASKED_AS; checking HEAD as $TAG"
   echo
 fi
@@ -285,9 +334,12 @@ note() { printf '  %-6s %s\n' "$1" "$2"; }
 
 echo "release $TAG at $(git rev-parse --short "$SHA")"
 
-# Uncommitted work is now consulted by nothing, which is right and is invisible:
-# the reader is looking at 0.5.0 in an editor while the gate answers about the
-# 0.4.1 in the commit. Say so, rather than let the two be reconciled by guessing.
+# Nothing the checks grade is read from the working tree any more, which is right
+# and is invisible: the reader is looking at 0.5.0 in an editor while the gate
+# answers about the 0.4.1 in the commit. Say so, rather than let the two be
+# reconciled by guessing. (Two files on disk are still opened -- the manifest, for
+# the pack name the tag is parsed against, and `bump-version.sh`, as check 1's
+# tool. Neither is graded; both are named in the header.)
 # Untracked files are excluded because they cannot be in the commit either way,
 # and a notice that fires on every scratch file is a notice nobody reads.
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
@@ -341,10 +393,27 @@ if [ "$HEAD_MODE" -eq 1 ]; then
   # from `$SHA` -- built from the working tree and compared against the commit,
   # this would have been a real check wearing the words of an empty one.
   note ok "HEAD would ship $VERSION"
-elif [ "$MANIFEST_VERSION" = "$VERSION" ]; then
+# A tag is a pack and a version, and both halves have to be the commit's own.
+# The version half was the whole of this check, and the name half was compared
+# against nothing: `$PLUGIN` came off the checkout, so `dovetail--v0.4.1` at a
+# commit whose manifests say `otherpack` matched on the only half that was
+# looked at, and checks 1, 3 and 4 have no opinion about which pack they are
+# reading. Four `ok`s for a tag that installs somebody else's pack -- this
+# check's own "worse than no tag", one field over.
+#
+# Reachable from the documented local form, `bash scripts/check-release.sh
+# <tag>` from a working clone, whenever a tag is cut across a rename: the
+# checkout carries the new name, the tagged commit still carries the old one.
+elif [ "${MANIFEST_NAME}--v${MANIFEST_VERSION}" = "$TAG" ]; then
   note ok "the commit's manifests carry $VERSION"
-else
+# Split by which half disagrees, because they are different repairs: a wrong
+# version is a bump or a retag, a wrong name is a tag cut against the wrong
+# pack's history and no version will fix it.
+elif [ "$MANIFEST_VERSION" != "$VERSION" ]; then
   note FAIL "tag says $VERSION, the commit's manifests say $MANIFEST_VERSION"
+  fail=1
+else
+  note FAIL "tag names $PLUGIN, the commit's manifests say $MANIFEST_NAME — a different pack"
   fail=1
 fi
 
@@ -365,7 +434,7 @@ if [ "$HEAD_MODE" -eq 1 ]; then
       note FAIL "$VERSION is already released, at $(git rev-parse --short "$TAGGED") — bump the version"
       fail=1
     fi
-  elif [ -n "$(git tag --list "${PLUGIN}--v*")" ]; then
+  elif [ -n "$(git tag --list "${MANIFEST_NAME}--v*")" ]; then
     note ok "$VERSION is not released yet"
   else
     # Same contract as the `gh` leg below, and it is load-bearing here rather
@@ -375,7 +444,7 @@ if [ "$HEAD_MODE" -eq 1 ]; then
     # actions/checkout's default all produce the second, and from inside the
     # repository the two are identical. Passing quietly on that evidence is the
     # original bug restored by environment alone, so say what could not be read.
-    note SKIP "no $PLUGIN tags here — cannot tell an unreleased version from an unfetched tag"
+    note SKIP "no $MANIFEST_NAME tags here — cannot tell an unreleased version from an unfetched tag"
     if [ "$STRICT" -eq 1 ]; then
       fail=1
     fi

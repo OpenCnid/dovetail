@@ -780,6 +780,155 @@ else
   note ok "$FIXTURE_TAG — $RELEASED_SHORT still passes from a checkout carrying $HEAD_VERSION"
 fi
 
+# ------------------- the tag names one pack, the commit carries another
+# The two sections above put the tree and the commit at odds about the
+# *version*, which is the half check 2 always compared. The name was the other
+# half, and nothing compared it at all: `$PLUGIN` came off the checkout, so a
+# tag was matched against the pack the reader happens to have open rather than
+# against the pack the tagged commit ships.
+#
+# Measured before the fix, in this fixture's shape: `dovetail--v8.8.8` pointing
+# at a commit whose `plugin.json` says `name: otherpack` printed
+# `release dovetail--v8.8.8 at <that commit>` and four `ok`s, exit 0. Checks 1,
+# 3 and 4 have no opinion about which pack they are reading — a version agrees
+# with itself, a notes entry is keyed on the version, ancestry is a commit
+# question — so check 2 was the only one that could have caught it, and it was
+# looking at the other field. That is this check's own "a tag that says 0.4.1
+# and installs 0.4.0", one field over: a tag that says `dovetail` and installs
+# somebody else's pack.
+#
+# Reachable from the documented local form, `bash scripts/check-release.sh
+# <tag>` from a working clone, whenever a tag is cut across a rename: the
+# checkout carries the new name and the tagged commit still carries the old one.
+# Not reachable from a tag push, where the checkout *is* the tag — the same
+# reason the version half lasted as long as it did.
+echo
+echo "behaviour — the tag names one pack, the commit carries another"
+
+PACK="${FIXTURE_TAG%%--v*}"
+FOREIGN_PACK="otherpack"
+FOREIGN_VERSION="8.8.8"
+CONTROL_VERSION="7.7.7"
+FOREIGN_TAG="${PACK}--v$FOREIGN_VERSION"
+CONTROL_TAG="${PACK}--v$CONTROL_VERSION"
+
+# `newline="\n"` for the same reason bump-version.sh uses it: the fixture sets
+# `core.autocrlf false`, and a manifest rewritten with CRLF would show up as a
+# whole-file change and as a tree that never matches its commit.
+set_pack_name() {
+  "$PYJSON" - "$FIXTURE/.claude-plugin/plugin.json" "$1" <<'PY'
+import json, sys
+path, name = sys.argv[1], sys.argv[2]
+data = json.load(open(path))
+data["name"] = name
+with open(path, "w", newline="\n") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
+# The foreign-named commit, and a tag over it carrying *this* pack's name. Only
+# `plugin.json`'s `name` moves: `.version-bump.json` lists version fields alone,
+# so check 1 still sees a self-consistent set and check 2 is left as the sole
+# discriminator — which is the point, since check 2 is where the name was not
+# being read.
+bash "$FIXTURE/scripts/bump-version.sh" "$FOREIGN_VERSION" >/dev/null
+printf '\n## v%s (2026-08-06)\n\nA pack by another name.\n' "$FOREIGN_VERSION" >> "$FIXTURE/RELEASE-NOTES.md"
+set_pack_name "$FOREIGN_PACK"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "rename to $FOREIGN_PACK"
+FOREIGN="$(git -C "$FIXTURE" rev-parse HEAD)"
+FOREIGN_SHORT="$(git -C "$FIXTURE" rev-parse --short "$FOREIGN")"
+git -C "$FIXTURE" tag "$FOREIGN_TAG" "$FOREIGN"
+
+# And the checkout the reader is sitting in: the pack's own name back, a version
+# of its own, tagged and on `main`. This is the control as well as the setting —
+# a clean, ordinary release that has to keep passing.
+bash "$FIXTURE/scripts/bump-version.sh" "$CONTROL_VERSION" >/dev/null
+printf '\n## v%s (2026-08-06)\n\nNamed as itself.\n' "$CONTROL_VERSION" >> "$FIXTURE/RELEASE-NOTES.md"
+set_pack_name "$PACK"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "rename back to $PACK"
+CONTROL="$(git -C "$FIXTURE" rev-parse HEAD)"
+CONTROL_SHORT="$(git -C "$FIXTURE" rev-parse --short "$CONTROL")"
+git -C "$FIXTURE" tag "$CONTROL_TAG" "$CONTROL"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$CONTROL"
+
+# This section's canary. A fixture whose checkout and tagged commit agreed on
+# the name would pass every assertion below while testing nothing — and the two
+# `set_pack_name` calls are exactly the kind of write that fails quietly.
+DISK_NAME="$("$PYJSON" -c 'import json,sys;print(json.load(open(sys.argv[1]))["name"])' \
+  "$FIXTURE/.claude-plugin/plugin.json")"
+FOREIGN_NAME="$(git -C "$FIXTURE" show "$FOREIGN:.claude-plugin/plugin.json" \
+  | "$PYJSON" -c 'import json,sys;print(json.load(sys.stdin)["name"])')"
+
+if [ "$DISK_NAME" = "$PACK" ] && [ "$FOREIGN_NAME" = "$FOREIGN_PACK" ]; then
+  note ok "fixture: the checkout is $DISK_NAME, $FOREIGN_SHORT is $FOREIGN_NAME"
+else
+  note FAIL "fixture: checkout $DISK_NAME, commit $FOREIGN_NAME — the assertions below prove nothing"
+  fail=1
+fi
+
+# Explicit-tag mode. The tag parses against the checkout's name — it has to,
+# there is no resolved commit at that point — and then the commit it resolves to
+# ships a different pack. Run without `--strict` so the exit code means the
+# checks rather than the stub `gh`.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$FOREIGN_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $FOREIGN_TAG at $FOREIGN_SHORT"; then
+  note FAIL "$FOREIGN_TAG — did not grade the tagged commit ($FOREIGN_SHORT)"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "$FOREIGN_TAG — exit $rc, expected 1 ($FOREIGN_SHORT ships $FOREIGN_PACK)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "the commit's manifests say $FOREIGN_PACK"; then
+  note FAIL "$FOREIGN_TAG — the name check read the checkout rather than $FOREIGN_SHORT"
+  fail=1
+else
+  note ok "$FOREIGN_TAG — refused: the tag names $PACK, $FOREIGN_SHORT carries $FOREIGN_PACK"
+fi
+
+# The control, and the reason the assertion above is about disagreement rather
+# than about `otherpack` being unwelcome. Same checkout, same command, a tag
+# whose commit carries the name it claims.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$CONTROL_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $CONTROL_TAG at $CONTROL_SHORT"; then
+  note FAIL "$CONTROL_TAG — did not grade the tagged commit ($CONTROL_SHORT)"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "$CONTROL_TAG — exit $rc, expected 0 ($CONTROL_SHORT carries $PACK and $CONTROL_VERSION)"
+  fail=1
+else
+  note ok "$CONTROL_TAG — the name agreeing with the commit still passes"
+fi
+
+# HEAD mode's version of the same read, and the sharper half: here the name does
+# not lose a comparison, it decides which tag namespace the already-released
+# check looks in. Built from the checkout, an uncommitted rename sent that check
+# hunting for tags of a pack that has never released anything, and it reported
+# that it could not tell — a `SKIP` where there had been a verdict, and without
+# `--strict` that is exit 0. The check the mode exists for, switched off by an
+# unsaved edit to a file the gate says it does not consult.
+set_pack_name "renamed"
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+
+if printf '%s\n' "$out" | grep -qF "renamed"; then
+  note FAIL "--head — an uncommitted rename became the pack HEAD would ship"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "checking HEAD as $CONTROL_TAG"; then
+  note FAIL "--head — did not name $PACK, the pack $CONTROL_SHORT carries"
+  fail=1
+elif printf '%s\n' "$out" | grep -qF "cannot tell an unreleased version from an unfetched tag"; then
+  note FAIL "--head — the already-released check was pointed at a pack with no tags"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "already points here"; then
+  note FAIL "--head — did not resolve $CONTROL_TAG, which points at HEAD"
+  fail=1
+else
+  note ok "--head — an uncommitted rename does not become what HEAD would ship"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "Release-check tests passed." || echo "Release-check tests FAILED."
 exit "$fail"

@@ -130,7 +130,10 @@ looked.
 
 **It has two modes, and the mode decides which commit those five are asked
 about.** With no tag named — or with `--head`, which says the same thing out
-loud — it grades `git rev-parse HEAD` and resolves no tag at all. Name a tag and
+loud — it grades `git rev-parse HEAD` and resolves no tag to find its subject.
+(It does look one up, later and for one question only: whether the version HEAD
+would ship is already out. That is the already-released check below, and it is
+the only `refs/tags/` read HEAD mode makes.) Name a tag and
 it grades that tag's commit, or **exits 2 when this clone has no ref for it**,
 rather than grading HEAD under that tag's name: `git clone --no-tags` was enough
 to make it report an already-published release as passing, about a commit that
@@ -169,7 +172,7 @@ where mode and commit disagreed, so **the mode decides again**. `release.yml`'s
 `Fetch main` step is load-bearing for the comparison, since a stale
 `origin/main` makes a stale HEAD look current.
 
-**All five grade that commit, and none of them reads the files on disk.** The
+**All five grade that commit, and none of them grades a file off the disk.** The
 first three used to. `check-release.sh` `cd`s to the repository root, so
 manifest agreement, the version comparison and the notes entry were answered
 from the working tree while ancestry and CI were answered about the resolved
@@ -194,6 +197,35 @@ working tree; the wording is today's, the verdict is the one that shipped before
 this was fixed). Reading the version out of the commit is what makes a published
 tag verifiable from a checkout that has since moved past it — which is most
 checkouts, most of the time.
+
+**That fix moved the version and left the pack name behind, and the same bug
+came back one field over.** A tag is a name and a version. Check 2 compared the
+version, and nothing compared the name at all: it came off the checkout, so
+`dovetail--v8.8.8` pointing at a commit whose `plugin.json` says `otherpack`
+matched on the only half anybody looked at, and checks 1, 3 and 4 have no
+opinion about which pack they are reading — a version agrees with itself, a
+notes entry is keyed on the version, ancestry is a question about a commit. Four
+`ok`s and exit 0 for a tag that installs somebody else's pack, which is check
+2's own "a tag that says 0.4.1 and installs 0.4.0" with the other field wrong.
+Both halves now come out of the commit, and HEAD mode builds the name it checks
+from the commit too — built from the checkout, an uncommitted rename pointed the
+already-released check at a pack with no tags and turned that `FAIL` into a
+`SKIP`, which without `--strict` is exit 0. Reachable the same way the version
+half was: `bash scripts/check-release.sh <tag>` from a working clone, across a
+rename. A tag push never reaches it, because there the checkout *is* the tag.
+
+**Two reads from the checkout survive, deliberately.** The pack name is read
+there once, before any commit is resolved, because parsing the tag needs a name
+and there is nothing else to take one from yet — that is a shape test against
+this pack's convention, and the *name check* is check 2, which reads the commit.
+And `scripts/bump-version.sh` is copied from the checkout rather than run out of
+whichever commit a tag names, because executing a `bash` script from an
+arbitrary tagged commit is a larger promise than this gate needs to make. The
+cost is that check 1's verdict about a fixed commit is a function of the
+checkout's tooling: refactor `bump-version.sh` so it resolves its root
+differently, and check 1 silently grades the working tree again. Nothing catches
+that today. So the accurate statement is that no file the checks *grade* is read
+from disk — not that the disk is never opened.
 
 `release.yml` picks the mode from `github.event_name`, not from `ref_type`: a
 dispatch launched from a tag ref reports `ref_type: tag` too, so `ref_type`
