@@ -144,6 +144,11 @@ To check nothing is broken after an edit:
 bash scripts/test-skills.sh
 ```
 
+The live half installs the pack into a scratch `CLAUDE_CONFIG_DIR` rather than
+your own. It proves that redirect took effect before it writes anything, and
+exits 2 without running rather than touching your real `~/.claude` when it
+cannot.
+
 ## Honest bits
 
 Things worth knowing before you rely on this:

@@ -13,8 +13,13 @@
 # Not covered here, and worth knowing:
 #   * `test-skills.sh` runs its static layer only. The live layer installs the
 #     pack into a throwaway CLAUDE_CONFIG_DIR and invokes each skill, which
-#     needs the `claude` CLI on PATH. It needs no login and spends nothing, so
-#     it is addable -- it just is not added yet.
+#     needs two things: the `claude` CLI on PATH, and a shell that propagates
+#     CLAUDE_CONFIG_DIR to it. A POSIX shell invoking a Windows claude.exe does
+#     not, so the layer now proves the redirect took effect and exits 2 without
+#     running when it cannot. It needs no login and costs no API turn, so it is
+#     addable -- it just is not added yet, and adding it means deciding whether
+#     that exit 2 reads as a skip or a failure. Neither runner is affected:
+#     ubuntu-latest and windows-latest each run a native CLI.
 #   * A skill that loads is still not a skill that works. Nothing here measures
 #     whether a loaded skill changes what the model does.
 name: checks
