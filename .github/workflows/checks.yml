@@ -1,0 +1,91 @@
+# What this runs, and why both operating systems.
+#
+# The Linux leg is not symmetry for its own sake. The bug that prompted this
+# workflow -- a test that rebuilt a path from a file:// URI by stripping the
+# scheme textually -- passed on Windows for two releases and failed on Linux
+# only, because a Windows file URI carries a drive letter and a POSIX one
+# starts with the slash the strip removed. One platform is how that survived.
+#
+# `fail-fast: false` for the same reason: when one leg goes red the other one's
+# result is the interesting half, and cancelling it hides exactly the
+# platform-shaped difference this exists to surface.
+#
+# Not covered here, and worth knowing:
+#   * `test-skills.sh` runs its static layer only. The live layer installs the
+#     pack into a throwaway CLAUDE_CONFIG_DIR and invokes each skill, which
+#     needs the `claude` CLI on PATH. It needs no login and spends nothing, so
+#     it is addable -- it just is not added yet.
+#   * A skill that loads is still not a skill that works. Nothing here measures
+#     whether a loaded skill changes what the model does.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # PyYAML is the skill's one non-stdlib runtime dependency; pytest is the
+      # runner. The tests themselves are stdlib unittest and run either way.
+      - name: Install dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --quiet
+          pytest -r skills/better-skill-creator/requirements.txt
+
+      # Preinstalled on GitHub's Ubuntu images, but installing when absent keeps
+      # --strict below from turning a missing tool into a red build.
+      - name: Ensure shellcheck
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          fi
+          shellcheck --version
+
+      # Fails when skills/ and the lists in install.sh and test-skills.sh
+      # disagree, so a skill added to one and not the other cannot install on
+      # one route and go missing on the other.
+      - name: Skill inventory
+        shell: bash
+        run: bash scripts/test-skills.sh --static
+
+      # Load-bearing rather than tidy: the marketplace entry is strict: true and
+      # `claude plugin tag` refuses to tag when the manifests disagree.
+      - name: Version agreement
+        shell: bash
+        run: bash scripts/bump-version.sh --check
+
+      # --strict on Linux only, where shellcheck is guaranteed above. On Windows
+      # the semantic pass is skipped and the script says so rather than passing
+      # quietly, which is the behaviour --strict would otherwise fail on.
+      - name: Shell lint
+        shell: bash
+        run: bash scripts/lint-shell.sh ${{ runner.os == 'Linux' && '--strict' || '' }}
+
+      - name: Tests
+        shell: bash
+        working-directory: skills/better-skill-creator
+        run: python -m pytest -q

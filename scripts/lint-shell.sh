@@ -10,9 +10,12 @@
 # Two passes, because they need different things:
 #
 #   bash -n     parse only. Always available, so this is the pass that gates.
-#   shellcheck  semantic lint — unquoted expansions, dead assignments. Reports
-#               only when installed; absence is stated rather than skipped
-#               quietly, so a clean run cannot mean "nothing was checked".
+#   `shellcheck`  semantic lint — unquoted expansions, dead assignments.
+#               Reports only when installed; absence is stated rather than
+#               skipped quietly, so a clean run cannot mean "nothing was
+#               checked". Backticked because an unadorned `# shellcheck` at the
+#               start of a comment is a directive, and this line parsed as a
+#               malformed one (SC1072/SC1073), which suppressed real checks.
 #
 # Usage:
 #   bash scripts/lint-shell.sh
@@ -67,7 +70,14 @@ if command -v shellcheck >/dev/null 2>&1; then
       printf '  ok    %s\n' "$f"
     else
       printf '  WARN  %s\n' "$f"
-      shellcheck -S warning "$f" 2>&1 | sed 's/^/        /' | head -20
+      # `|| true` is load-bearing. shellcheck exits non-zero by definition on
+      # this branch, and `set -o pipefail` made that the whole pipeline's
+      # status, so `set -e` aborted the run at the first finding -- before the
+      # loop finished, before the summary line, and with a 0 exit code. A lint
+      # that reported a problem and then passed is worse than no lint at all.
+      # awk rather than `| head -20` for the same reason: head closing the pipe
+      # early is a second way to hand set -e a non-zero status.
+      shellcheck -S warning "$f" 2>&1 | awk 'NR <= 20 { print "        " $0 }' || true
       fail=1
     fi
   done
