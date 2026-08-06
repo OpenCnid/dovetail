@@ -116,6 +116,12 @@ jobs:
       # ref exists. A stale or absent `origin/main` is what makes a stale HEAD
       # look current, which is the failure the comparison is standing in front
       # of.
+      #
+      # The absent half is now loud rather than silent: the fallback is a SKIP,
+      # and this script calls the gate with `--strict`, so dropping this step
+      # refuses the publish instead of grading it against whatever ref the
+      # runner happened to carry. Stale is still the quiet one, and still this
+      # step's job.
       - name: Fetch main
         run: git fetch --no-tags origin +main:refs/remotes/origin/main
 

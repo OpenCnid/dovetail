@@ -173,6 +173,32 @@ where mode and commit disagreed, so **the mode decides again**. `release.yml`'s
 `Fetch main` step is load-bearing for the comparison, since a stale
 `origin/main` makes a stale HEAD look current.
 
+**Requiring the tip is only as good as the ref the tip is read from**, and that
+is a way in of its own. The check prefers `refs/remotes/origin/main` and falls back
+to `refs/heads/main` when there is no remote-tracking ref, and nothing asks the
+remote what the local one is worth — `refs/heads/main` is whatever this clone
+last fetched, plus whatever was committed on it and never pushed. In an ordinary
+working clone with a local `main` a few commits behind, `bash
+scripts/check-release.sh --strict --head` reported `ok HEAD is refs/heads/main`
+and exited 0 about a commit the real `main` had moved past. Same verdict as the
+stale dispatch above, bought with a stale ref rather than a stale HEAD, and
+reached without anybody doing anything unusual: not having fetched is what a
+clone is between fetches. Both modes are unsound against it — HEAD equalling a
+local `main` says nothing about the remote's tip, and a local `main` carrying
+unpushed commits calls a commit that is on nobody else's `main` "on `main`" —
+so **the fallback is a SKIP in both**, named in the output, with the verdict
+still printed beneath it and `--strict` making it fatal. That is the contract
+this gate already uses for a missing `gh` and an empty `refs/tags/`: could not
+read the evidence. It is not repaired with `git ls-remote`, for the reason the
+unresolvable-tag branch gives — the answer would still be "fetch it and ask
+again", bought with a network call. **CI is unaffected**: `release.yml` runs
+`git fetch --no-tags origin +main:refs/remotes/origin/main` before either mode,
+so the remote-tracking ref is always present there. This is the local and
+hand-run path, which is also the one documented above as the way to verify a
+published release. What it still cannot see is a *stale*
+`refs/remotes/origin/main` — the same failure with the fetch skipped rather than
+the ref missing, and that fetch step is what stands in front of it.
+
 **All of them grade that commit, and none of them grades a file off the disk.**
 The manifest-reading ones used to. `check-release.sh` `cd`s to the repository root, so
 manifest agreement, the version comparison and the notes entry were answered

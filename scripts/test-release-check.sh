@@ -42,6 +42,17 @@
 #              truncated a file outside the snapshot. This layer is back at the
 #              first layer's question, one input over.
 #
+# Three more sections extend that third layer with a further question: given the
+# right commit, what did the gate accept *from* it. A commit writes its own
+# `.claude-plugin/marketplace.json` and its own `.version-bump.json`, so it gets
+# to say which repository it installs from and which manifests check 1 is
+# examined on; both were taken at face value. And the ref `main` is read from is
+# not in the commit at all -- it is whatever the clone happens to carry, and a
+# local one carries no news from the remote. Each is built as a fixture, graded,
+# and controlled against a commit differing in that one thing. The `paths` layer
+# is that question about the same file, asked of the bytes in the list rather
+# than of which fields the list names.
+#
 # Each layer fires its own canary first. Assertions that a file did not appear --
 # or did not change -- are free if nothing could have written one, and an
 # unwritable temp directory would pass every one of them.
@@ -1400,6 +1411,128 @@ elif [ "$rc" -ne 0 ]; then
 else
   note ok "$NARROWED_TAG — the whole list back, the same version passes"
 fi
+
+# -------------------------------- `main` read from a ref nobody has fetched
+# Check 5 prefers `refs/remotes/origin/main` and accepts `refs/heads/main` when
+# the remote-tracking ref is absent. Nothing contacts the remote to find out
+# what the local one is worth, and in an ordinary working clone it can be worth
+# very little: `refs/heads/main` is whatever this clone last fetched, plus
+# whatever was committed on it and never pushed.
+#
+# So in a clone whose local `main` is behind, `--strict --head` printed
+# `ok HEAD is refs/heads/main` and exited 0 about a commit the real `main` had
+# moved past. That is the shape the section above this one exists to refuse,
+# reached not by a stale HEAD but by a stale ref to compare it against — and it
+# is reached without anybody doing anything unusual, because not fetching is the
+# default state of a clone between fetches.
+#
+# Both modes are unsound against it, which is why the notice is not HEAD-mode
+# only. HEAD equalling a local `main` says nothing about the remote's tip; and a
+# local `main` carrying unpushed commits calls a commit that is on nobody else's
+# `main` "on `main`", which is check 5's own "nothing ships off a branch".
+#
+# CI never meets it: `release.yml` runs `git fetch --no-tags origin
+# +main:refs/remotes/origin/main` before either mode, so the remote-tracking ref
+# is always there. This is the local and hand-run path, which is also the one
+# AGENTS.md documents as the way to verify a release.
+#
+# Nothing here deletes `refs/heads/main` as well — that state (no `main` ref at
+# all) is a FAIL the gate has always given, and it is not what this is about.
+echo
+echo "behaviour — main read from a local ref nobody has checked against the remote"
+
+# A `gh` that answers, where every section above wants one that refuses. This is
+# the one place the difference matters: the assertion is what `--strict` fails
+# on, and a `gh` that is absent or unauthenticated fails `--strict` all by
+# itself, so a refusing stub could not tell the two apart. This one says yes to
+# everything, which is a lie about CI and exactly the point — it takes check 6
+# out of the exit code so the exit code is check 5's.
+mkdir -p "$TMP/bin-gh"
+cat > "$TMP/bin-gh/gh" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  auth) exit 0 ;;
+  api)  echo 1 ;;
+  *)    exit 1 ;;
+esac
+SH
+chmod +x "$TMP/bin-gh/gh"
+
+# This section's canary. Both refs have to resolve, and to the same commit, or
+# deleting one below changes the answer for a reason that has nothing to do with
+# which ref was read.
+ORIGIN_MAIN="$(git -C "$FIXTURE" rev-parse refs/remotes/origin/main)"
+LOCAL_MAIN="$(git -C "$FIXTURE" rev-parse refs/heads/main)"
+
+if [ "$ORIGIN_MAIN" = "$LOCAL_MAIN" ]; then
+  note ok "fixture: refs/heads/main and refs/remotes/origin/main are both $WHOLE_LIST_SHORT"
+else
+  note FAIL "fixture: refs/heads/main and refs/remotes/origin/main differ — the assertions below prove nothing"
+  fail=1
+fi
+
+# The control, run first because it is also the baseline the assertions below
+# are a difference from: with the remote-tracking ref present and a `gh` that
+# answers, this commit is a clean release and `--strict` exits 0.
+out="$(PATH="$TMP/bin-gh:$PATH" bash "$FIXTURE/scripts/check-release.sh" --strict --head 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qE '^ +ok +HEAD is refs/remotes/origin/main$'; then
+  note ok "--strict --head — with refs/remotes/origin/main present, $WHOLE_LIST_SHORT passes"
+else
+  note FAIL "--strict --head — $WHOLE_LIST_SHORT does not pass with origin/main present (exit $rc)"
+  fail=1
+fi
+
+# The same commit, the same command, one ref fewer. This is `git clone --no-tags`
+# for check 5: nothing about the release changed, only the evidence available to
+# grade it.
+git -C "$FIXTURE" update-ref -d refs/remotes/origin/main
+
+out="$(PATH="$TMP/bin-gh:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+if ! printf '%s\n' "$out" | grep -qF "grading against local refs/heads/main"; then
+  note FAIL "--head — fell back to refs/heads/main without saying so"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "--head — exit $rc, expected 0 (a SKIP is not fatal on its own)"
+  fail=1
+else
+  note ok "--head — the fallback is named, and without --strict it is not fatal"
+fi
+
+# And the assertion the section is for. `ok HEAD is refs/heads/main` still
+# prints, because being level with a local `main` is worth knowing; what it is
+# not worth is exit 0 under `--strict`, which is the contract this file already
+# holds the `gh` leg and the empty-`refs/tags/` leg to.
+out="$(PATH="$TMP/bin-gh:$PATH" bash "$FIXTURE/scripts/check-release.sh" --strict --head 2>&1)" && rc=0 || rc=$?
+if ! printf '%s\n' "$out" | grep -qF "HEAD is refs/heads/main"; then
+  note FAIL "--strict --head — did not name the ref it graded against"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "no refs/remotes/origin/main"; then
+  note FAIL "--strict --head — graded against a local ref without reporting it as a skip"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "--strict --head — exit $rc, expected 1 (a local-only main is evidence --strict refuses)"
+  fail=1
+else
+  note ok "--strict --head — 'ok HEAD is refs/heads/main' no longer exits 0"
+fi
+
+# Explicit-tag mode reports it too, and for its own reason: ancestry of a local
+# `main` carrying unpushed commits calls a commit on nobody else's `main` on it.
+out="$(PATH="$TMP/bin-gh:$PATH" bash "$FIXTURE/scripts/check-release.sh" --strict "$NARROWED_TAG" 2>&1)" && rc=0 || rc=$?
+if ! printf '%s\n' "$out" | grep -qF "grading against local refs/heads/main"; then
+  note FAIL "$NARROWED_TAG — explicit-tag mode graded a local main without reporting it"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "$NARROWED_TAG — exit $rc, expected 1 (--strict refuses the local-only ref in this mode too)"
+  fail=1
+else
+  note ok "$NARROWED_TAG — explicit-tag mode reports the fallback as well"
+fi
+
+# Put it back. Nothing runs after this today, and a fixture left in a state the
+# next section would have to discover is how a section acquires a dependency
+# nobody wrote down.
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$LOCAL_MAIN"
 
 echo
 [ "$fail" -eq 0 ] && echo "Release-check tests passed." || echo "Release-check tests FAILED."

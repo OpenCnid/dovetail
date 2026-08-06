@@ -63,7 +63,10 @@
 #   5. the commit is on `main`                    (nothing ships off a branch --
 #                                                  and where that commit is HEAD
 #                                                  it has to *be* `main`, not
-#                                                  merely sit in its history)
+#                                                  merely sit in its history.
+#                                                  Falling back to a local
+#                                                  `main` is a SKIP; see
+#                                                  --strict)
 #   6. `checks` concluded success on that SHA     (needs `gh`; see --strict)
 #
 # And one only HEAD mode can ask, between 3 and 4: that the version is not
@@ -96,6 +99,17 @@
 # HEAD, so the mode was explicit-tag while the subject was HEAD. That branch is
 # gone -- see it below for why -- and with it the only case where the two
 # disagreed, so the mode decides again.
+#
+# Requiring the tip is only as good as the ref the tip is read from, and that
+# was the next way in. Check 5 falls back to `refs/heads/main` when there is no
+# `refs/remotes/origin/main`, and nothing asks the remote what the local one is
+# worth: in a working clone whose `main` is a few commits behind, `--strict
+# --head` printed `ok HEAD is refs/heads/main` and exited 0 on a commit the real
+# `main` had moved past. Same verdict as the stale dispatch above, bought this
+# time with a stale ref rather than a stale HEAD, and with nobody doing anything
+# unusual -- not having fetched is what a clone is between fetches. CI never
+# meets it, because both entry points in `release.yml` fetch `origin/main`
+# first. The fallback is a SKIP now, and `--strict` makes it fatal.
 #
 # All of them grade the same commit, which took a fix of its own. The
 # manifest-reading checks read the files on disk while ancestry and CI read
@@ -172,7 +186,7 @@
 #                                                     #   manifests imply
 #   bash scripts/check-release.sh --head              # the same, said out loud
 #   bash scripts/check-release.sh dovetail--v0.4.1    # check an existing tag
-#   bash scripts/check-release.sh --strict            # no `gh`, no pass
+#   bash scripts/check-release.sh --strict            # any SKIP is a failure
 
 set -euo pipefail
 
@@ -673,13 +687,47 @@ fi
 # 5. `origin/main` where a remote-tracking ref exists, local `main` otherwise --
 # a fresh CI checkout has the former, a working clone usually both, and a
 # detached-HEAD checkout of a tag may have neither.
+#
+# The fallback is weaker evidence and now says so. `refs/heads/main` is whatever
+# this clone last fetched, plus whatever was committed on it and never pushed,
+# and nothing here contacts the remote to find out which. In an ordinary working
+# clone with a local `main` a few commits behind, `--strict --head` reported
+# `ok HEAD is refs/heads/main` and exited 0 about a commit the real `main` had
+# moved past -- the failure the mode split above exists to refuse, reached this
+# time not by a stale HEAD but by a stale ref to compare it against. Not an
+# unusual state: not having fetched is what a clone is between fetches.
+#
+# Reported in both modes, because both are unsound against it. HEAD equalling a
+# local `main` says nothing about the remote's tip. And a local `main` carrying
+# unpushed commits calls a commit that is on nobody else's `main` "on `main`",
+# which is this check's own "nothing ships off a branch".
+#
+# A SKIP rather than a FAIL, on the contract this file already uses for the `gh`
+# leg and for an empty `refs/tags/`: the evidence could not be read, `--strict`
+# makes that fatal, and the verdict below still prints because being level with
+# or behind a local `main` is worth knowing. Not repaired with `git ls-remote`,
+# for the reason the unresolvable-tag branch gives -- the answer would still be
+# "fetch it and ask again", bought with a network call.
+#
+# It cannot see a *stale* `refs/remotes/origin/main`, which is the same failure
+# with the fetch skipped rather than the ref missing. `release.yml`'s `Fetch
+# main` step is what stands in front of that one, and CI never reaches this
+# branch because of it.
 MAIN=""
-for ref in refs/remotes/origin/main refs/heads/main; do
-  if git rev-parse -q --verify "$ref" >/dev/null; then
-    MAIN="$ref"
-    break
+MAIN_IS_LOCAL=0
+if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then
+  MAIN=refs/remotes/origin/main
+elif git rev-parse -q --verify refs/heads/main >/dev/null; then
+  MAIN=refs/heads/main
+  MAIN_IS_LOCAL=1
+fi
+
+if [ "$MAIN_IS_LOCAL" -eq 1 ]; then
+  note SKIP "no refs/remotes/origin/main here — grading against local $MAIN, which nothing has checked against the remote (git fetch origin main)"
+  if [ "$STRICT" -eq 1 ]; then
+    fail=1
   fi
-done
+fi
 
 # Two strengths of one question, because the two subjects need different ones. A
 # resolved tag has to prove it is somewhere on `main`. A run grading HEAD has to
