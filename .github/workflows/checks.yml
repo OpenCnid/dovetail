@@ -88,7 +88,9 @@ jobs:
       # The release gate's one outside input is the tag name, and a tag name is
       # chosen by whoever pushes it. This asserts no workflow interpolates such
       # a value into a `run:` body, and that check-release.sh refuses a tag it
-      # cannot parse instead of carrying the text onward.
+      # cannot parse instead of carrying the text onward. It also builds a
+      # throwaway repository with a tag and a later commit on `main`, and
+      # asserts HEAD mode grades HEAD there rather than the tag.
       - name: Release-gate tests
         shell: bash
         run: bash scripts/test-release-check.sh

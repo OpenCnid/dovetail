@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# check-release.sh — refuse a tag that does not point at a checked commit.
+# check-release.sh — refuse a release that does not sit on a checked commit.
 #
 # This exists because of what happened at 0.4.0. The tag went up, then four
 # commits landed on `main` fixing stale licence records, stale test paths, a
@@ -16,6 +16,26 @@
 # thing that broke. A later commit is not good enough either: it is not what the
 # tag hands to an installer.
 #
+# Two modes, because "is this releasable?" is two questions:
+#
+#   HEAD mode      `--head`, or no tag at all. The subject is `git rev-parse
+#                  HEAD`, always, and no tag is ever resolved. This is the
+#                  pre-flight -- it answers "is `main` releasable right now?"
+#   explicit-tag   a tag name. The subject is the commit that tag points at,
+#                  which is the thing an installer actually receives.
+#
+# They were one path, and the seam leaked. The no-tag form derived a tag name
+# from the manifests and then resolved it, so from the moment
+# `dovetail--v0.4.1` existed, `bash scripts/check-release.sh` printed "checking
+# HEAD" and graded `313b9e4` -- the commit that tag already pointed at. Every
+# later commit on `main` carrying the same version inherited that verdict. It
+# is the 0.4.0 failure one layer up: not a stale release this time but a stale
+# answer about one, and `workflow_dispatch` ran exactly that path.
+#
+# So HEAD mode resolves nothing, and it fails when the version it would release
+# is already tagged at another commit, because a version ships once and the
+# repair for that is a bump rather than a retag.
+#
 # Five checks, in the order that gives the most useful failure first:
 #
 #   1. the manifests agree with each other        (bump-version.sh --check)
@@ -26,14 +46,26 @@
 #   4. the commit is on `main`                    (nothing ships off a branch)
 #   5. `checks` concluded success on that SHA     (needs `gh`; see --strict)
 #
+# And one only HEAD mode can ask, between 2 and 3: that the version is not
+# already released at some other commit. In explicit-tag mode the tag exists at
+# the commit under test by definition, so the question is empty there. It reads
+# `refs/tags/`, so a clone without tags cannot answer it -- and says so rather
+# than passing, because "never released" and "never fetched" look identical from
+# in here and only one of them is safe.
+#
+# Check 2 runs the other way round: in HEAD mode it is the empty one, because
+# the version it compares against came out of the manifests it is comparing. It
+# prints what HEAD would ship instead of claiming a verdict.
+#
 # Before any of them, the tag has to be a tag this pack could have issued:
 # `<plugin>--v<major>.<minor>.<patch>`, optionally `-<prerelease>`. Anything
 # else exits 2 without reading a manifest or touching git. See the block above
 # the check for why a release gate validates the shape of its own input.
 #
 # Usage:
-#   bash scripts/check-release.sh                     # check HEAD as the tag
-#                                                     #   the manifests imply
+#   bash scripts/check-release.sh                     # HEAD, as the tag the
+#                                                     #   manifests imply
+#   bash scripts/check-release.sh --head              # the same, said out loud
 #   bash scripts/check-release.sh dovetail--v0.4.1    # check an existing tag
 #   bash scripts/check-release.sh --strict            # no `gh`, no pass
 
@@ -44,25 +76,50 @@ cd "$ROOT"
 
 command -v python3 >/dev/null 2>&1 && PY=python3 || PY=python
 
+USAGE="usage: bash scripts/check-release.sh [--strict] [--head|<tag>]"
+
 STRICT=0
+HEAD_MODE=0
+ASKED_AS=""
 TAG=""
 for arg in "$@"; do
   case "$arg" in
     --strict) STRICT=1 ;;
+    --head)   HEAD_MODE=1 ;;
     "") ;;
-    -*) echo "usage: bash scripts/check-release.sh [--strict] [<tag>]" >&2; exit 2 ;;
+    -*) echo "$USAGE" >&2; exit 2 ;;
     *) TAG="$arg" ;;
   esac
 done
 
+# The two modes ask different questions, so asking for both asks for nothing.
+# Exit 2 rather than pick one: this is input that did not parse, not a check
+# that failed, and the difference is what tells them apart in a CI log.
+if [ "$HEAD_MODE" -eq 1 ] && [ -n "$TAG" ]; then
+  echo "not both: --head checks HEAD, a tag name checks that tag" >&2
+  echo "$USAGE" >&2
+  exit 2
+fi
+
+# No tag named is HEAD mode too. Both routes reach it: a human running the
+# pre-flight by hand passes nothing, and release.yml's dispatch step passes an
+# empty string. Which route it was decides only the wording -- a message that
+# names the wrong reason is how the last one stayed hidden for two releases.
+if [ -z "$TAG" ]; then
+  ASKED_AS="No tag given"
+  [ "$HEAD_MODE" -eq 1 ] && ASKED_AS="HEAD mode"
+  HEAD_MODE=1
+fi
+
 PLUGIN="$("$PY" -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["name"])')"
 MANIFEST_VERSION="$("$PY" -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
 
-# No tag named: check the release the working tree is currently describing. This
-# is the pre-flight form -- run it before `claude plugin tag`, not after.
-if [ -z "$TAG" ]; then
+# HEAD mode still needs a tag *name* -- checks 2 and 3 grade a version string,
+# and the version HEAD would ship is the one the manifests carry. Naming it is
+# not the same as resolving it, and below, HEAD mode does not resolve it.
+if [ "$HEAD_MODE" -eq 1 ]; then
   TAG="${PLUGIN}--v${MANIFEST_VERSION}"
-  echo "No tag given; checking HEAD as $TAG"
+  echo "$ASKED_AS; checking HEAD as $TAG"
   echo
 fi
 
@@ -94,13 +151,24 @@ esac
 
 [[ "$VERSION" =~ $VERSION_RE ]] || reject_tag "$TAG"
 
+# The mode decides the subject, and HEAD mode decides it without consulting
+# `refs/tags/` at all. That unconditional `git rev-parse HEAD` is the fix: the
+# branch below used to run in both modes, so a tag that already existed silently
+# took HEAD's place while the banner above still said "checking HEAD".
+if [ "$HEAD_MODE" -eq 1 ]; then
+  SHA="$(git rev-parse HEAD)"
 # An annotated tag's own object is not the commit it points at, and `git
 # rev-list -n 1` resolves through to the commit either way.
-if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   SHA="$(git rev-list -n 1 "$TAG")"
 else
+  # A named tag with no local ref is usually somebody checking a release they
+  # are about to cut, so this falls back to HEAD rather than refusing. "No such
+  # ref here" is all it can honestly claim, though: a clone that never fetched
+  # tags looks exactly like a tag that was never made, and this branch cannot
+  # tell them apart. Saying "does not exist" would assert the one it prefers.
   SHA="$(git rev-parse HEAD)"
-  echo "tag $TAG does not exist yet; checking HEAD ($(git rev-parse --short "$SHA"))"
+  echo "no local tag $TAG; checking HEAD ($(git rev-parse --short "$SHA"))"
   echo
 fi
 
@@ -119,11 +187,51 @@ else
   fail=1
 fi
 
-if [ "$MANIFEST_VERSION" = "$VERSION" ]; then
+if [ "$HEAD_MODE" -eq 1 ]; then
+  # Not a check in this mode, and printed as what it is. `$VERSION` was parsed
+  # back out of a tag name this script built from `$MANIFEST_VERSION` twenty
+  # lines up, so the comparison below cannot fail here; an `ok` that cannot go
+  # the other way reads as a check and is not one.
+  note ok "HEAD would ship $VERSION"
+elif [ "$MANIFEST_VERSION" = "$VERSION" ]; then
   note ok "manifests carry $VERSION"
 else
   note FAIL "tag says $VERSION, manifests say $MANIFEST_VERSION"
   fail=1
+fi
+
+# HEAD mode only, and it is the check that makes the mode worth having. Not
+# resolving the tag stops the gate answering about the wrong commit; it does not
+# stop HEAD being unreleasable *because* that version already went out. A
+# version ships once, so once `$TAG` names another commit the repair is a bump,
+# not a retag -- and a published tag is a thing other people have installed.
+#
+# In explicit-tag mode the tag existing at the commit under test is the ordinary
+# case and carries no information, so this stays quiet there.
+if [ "$HEAD_MODE" -eq 1 ]; then
+  if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    TAGGED="$(git rev-list -n 1 "$TAG")"
+    if [ "$TAGGED" = "$SHA" ]; then
+      note ok "$TAG already points here — this commit is the release"
+    else
+      note FAIL "$VERSION is already released, at $(git rev-parse --short "$TAGGED") — bump the version"
+      fail=1
+    fi
+  elif [ -n "$(git tag --list "${PLUGIN}--v*")" ]; then
+    note ok "$VERSION is not released yet"
+  else
+    # Same contract as the `gh` leg below, and it is load-bearing here rather
+    # than tidy. This check reads `refs/tags/`, and an empty `refs/tags/` has
+    # two readings with opposite verdicts: nothing has ever been released, or
+    # this clone never fetched tags. `git clone --depth 1`, `--no-tags` and
+    # actions/checkout's default all produce the second, and from inside the
+    # repository the two are identical. Passing quietly on that evidence is the
+    # original bug restored by environment alone, so say what could not be read.
+    note SKIP "no $PLUGIN tags here — cannot tell an unreleased version from an unfetched tag"
+    if [ "$STRICT" -eq 1 ]; then
+      fail=1
+    fi
+  fi
 fi
 
 # 3. The heading format is `## v0.4.1 (2026-08-05)`.

@@ -124,6 +124,27 @@ exists: `checks.yml` runs on commits, so a tag can point at anything, and at
 `0.4.0` it pointed at the commit before four green fixes for as long as nobody
 looked.
 
+**It has two modes, and the mode decides which commit those five are asked
+about.** With no tag named — or with `--head`, which says the same thing out
+loud — it grades `git rev-parse HEAD` and resolves no tag at all. Name a tag and
+it grades that tag's commit. Run it after the tag exists and the bare form is
+still about HEAD, which it was not until this was split: the no-tag form used to
+build a tag name out of the manifests and then resolve it, so from the moment
+`dovetail--v0.4.1` existed it printed "checking HEAD" and graded `313b9e4`. Any
+later commit on `main` keeping that version inherited a verdict about a commit
+two releases back, and `workflow_dispatch` — the run whose whole job is "is main
+releasable right now?" — ran exactly that path. HEAD mode also fails when the
+version it would release is already tagged elsewhere, because a version ships
+once and the repair is a bump. That last one reads `refs/tags/`, so **it needs a
+clone that fetched tags** — `--depth 1` and `--no-tags` produce a repository
+where "never released" and "never fetched" are the same evidence, and there it
+reports that it could not run rather than passing. `release.yml` keeps
+`fetch-depth: 0` for that reason, and `test-release-check.sh` asserts it does.
+
+`release.yml` picks the mode from `github.event_name`, not from `ref_type`: a
+dispatch launched from a tag ref reports `ref_type: tag` too, so `ref_type`
+cannot tell a dispatch from a push.
+
 **The tag name is input, and the gate treats it as such.** A tag has to read
 `dovetail--v<major>.<minor>.<patch>`, optionally `-<prerelease>`; anything else
 exits 2 before a manifest is opened. That is narrower than `git` — `git` will
@@ -132,7 +153,9 @@ happily create `dovetail--v9.9.9$(id)`, which matches the workflow's
 the tag to the script through `env: RELEASE_TAG` and expands it quoted, because
 `${{ }}` inside a `run:` body substitutes into the shell source before bash
 parses it, and a tag name is chosen by whoever pushes the tag.
-`scripts/test-release-check.sh` holds both halves of that in place and runs in
+`scripts/test-release-check.sh` holds both halves of that in place, pins which
+commit each mode grades — in a throwaway repository it builds with a tag and a
+later commit on `main`, so the two answers are different commits — and runs in
 `checks`; if you add a workflow, it will also tell you if a `run:` body reads an
 attacker-nameable context.
 
