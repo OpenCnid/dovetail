@@ -90,16 +90,24 @@ jobs:
         shell: bash
         run: bash scripts/lint-shell.sh ${{ runner.os == 'Linux' && '--strict' || '' }}
 
-      # The release gate's one outside input is the tag name, and a tag name is
-      # chosen by whoever pushes it. This asserts no workflow interpolates such
-      # a value into a `run:` body, and that check-release.sh refuses a tag it
-      # cannot parse instead of carrying the text onward. It also builds a
+      # The release gate takes two inputs from outside itself. One is the tag
+      # name, chosen by whoever pushes it: this asserts no workflow interpolates
+      # such a value into a `run:` body, and that check-release.sh refuses a tag
+      # it cannot parse instead of carrying the text onward. It also builds a
       # throwaway repository with a tag, a later commit on `main`, and a dirty
       # working tree, and asserts HEAD mode grades HEAD there rather than the
       # tag — that it refuses a HEAD which is merely an ancestor of `main`,
       # while explicit-tag mode, where a released tag is always behind the tip,
       # still accepts one — and that all five checks grade the commit under test
       # rather than the files lying in the working tree.
+      #
+      # The other input is that commit: grading its files means reading its
+      # `.version-bump.json` to learn which files, so the commit names paths the
+      # gate opens. A listed `../x` truncated a file outside the snapshot, before
+      # `git show` ever ran. The last section asserts such a path is refused and
+      # that a canary outside the snapshot survives byte for byte. The Windows
+      # leg is not redundant here: a backslash is a separator there and one
+      # filename on Linux, so `..\x` traverses on exactly one of these runners.
       - name: Release-gate tests
         shell: bash
         run: bash scripts/test-release-check.sh

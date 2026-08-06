@@ -35,10 +35,16 @@
 #              answers a different question from the other two: not "is this
 #              input safe?" but "is this the commit the answer is about?" See its
 #              own blocks further down.
+#   paths      the gate's *other* outside input, which the third layer created:
+#              grading a commit's files means reading that commit's
+#              `.version-bump.json` to learn which ones, so the commit under test
+#              names the paths that become redirection targets. A listed `../x`
+#              truncated a file outside the snapshot. This layer is back at the
+#              first layer's question, one input over.
 #
-# The behaviour layer fires its own canary first. Assertions that a file did not
-# appear are free if nothing could have written one, and an unwritable temp
-# directory would pass every one of them.
+# Each layer fires its own canary first. Assertions that a file did not appear --
+# or did not change -- are free if nothing could have written one, and an
+# unwritable temp directory would pass every one of them.
 #
 # The static layer is not delegated to `actionlint` because actionlint does not
 # make this finding. Its `expression` check carries a fixed list of untrusted
@@ -927,6 +933,170 @@ elif ! printf '%s\n' "$out" | grep -qF "already points here"; then
   fail=1
 else
   note ok "--head — an uncommitted rename does not become what HEAD would ship"
+fi
+
+# ------------------------------- the commit names the files, and that is input
+# The tag is the input everybody looks at. This is the other one, and it arrived
+# with the fix above: once the checks grade a commit's files rather than the
+# checkout's, something has to say which files, and that something is the
+# commit's own `.version-bump.json`. So the commit under test chooses those
+# paths, and `snapshot()` turned each into a redirection target.
+#
+# Bash opens a redirection target before the command on the line runs, so a
+# listed path of `../x` truncated `x` outside the snapshot and *then* `git show`
+# failed on a path no commit carries. The gate printed FAIL -- correctly, and
+# about manifests that disagree -- over a file it was never asked to touch that
+# was already empty, `mkdir -p` having made the directories on the way. Measured
+# 2026-08-06 on git-bash 5.2.37(msys), Windows 10: a 36-byte canary outside the
+# snapshot came back 0 bytes while the run reported the expected failure. Nothing
+# in the output mentioned the write, which is what made it a quiet one.
+#
+# `$SNAPSHOT` is `mktemp -d`, so where `..` lands is `$TMPDIR`'s business. This
+# section names `$TMPDIR` rather than guessing at one: the gate's snapshot
+# directory is then one level under a directory this script owns, and
+# `../canary.txt` reaches a file it can compare byte for byte.
+#
+# Its own fixture, rather than the one above. This needs a commit whose
+# `.version-bump.json` *is* the hostile input, and grafting that onto the shared
+# fixture would leave it there for everything added after.
+echo
+echo "behaviour — a path in .version-bump.json cannot write outside the snapshot"
+
+ESCAPE_TMP="$TMP/escape-tmpdir"
+ESCAPE_CANARY="$ESCAPE_TMP/canary.txt"
+ESCAPE_PRISTINE="$TMP/canary.pristine"
+ESCAPE_PATH="../canary.txt"
+
+mkdir -p "$ESCAPE_TMP"
+printf 'a canary that has to survive the gate byte for byte\n' > "$ESCAPE_CANARY"
+cp "$ESCAPE_CANARY" "$ESCAPE_PRISTINE"
+
+# This section's canary, fired the way the gate fired it: `mkdir -p` and a
+# redirection built from the listed path, in a snapshot directory made where the
+# gate will make its own. Every assertion below says a file did not change, and
+# those are free if nothing could have changed it -- an `mktemp` that ignored
+# `$TMPDIR`, or a `..` landing somewhere this script does not own, both put the
+# section there quietly. The `git show` is expected to fail; that is the point.
+ESCAPE_PROBE="$(TMPDIR="$ESCAPE_TMP" mktemp -d)"
+mkdir -p "$ESCAPE_PROBE/$(dirname "$ESCAPE_PATH")"
+git show "0000000000000000000000000000000000000000:$ESCAPE_PATH" \
+  > "$ESCAPE_PROBE/$ESCAPE_PATH" 2>/dev/null || true
+rm -rf "$ESCAPE_PROBE"
+
+if [ ! -s "$ESCAPE_CANARY" ]; then
+  note ok "canary fires when a listed path is redirected to"
+  cp "$ESCAPE_PRISTINE" "$ESCAPE_CANARY"
+else
+  note FAIL "canary cannot fire — every assertion below would pass vacuously"
+  fail=1
+fi
+
+ESCAPE_FIXTURE="$TMP/escape-fixture"
+mkdir -p "$ESCAPE_FIXTURE/.claude-plugin" "$ESCAPE_FIXTURE/scripts"
+cp .claude-plugin/plugin.json "$ESCAPE_FIXTURE/.claude-plugin/"
+cp RELEASE-NOTES.md "$ESCAPE_FIXTURE/"
+cp scripts/check-release.sh scripts/bump-version.sh "$ESCAPE_FIXTURE/scripts/"
+
+git -C "$ESCAPE_FIXTURE" -c init.defaultBranch=main init -q
+git -C "$ESCAPE_FIXTURE" symbolic-ref HEAD refs/heads/main
+git -C "$ESCAPE_FIXTURE" config core.autocrlf false
+
+# Commits a `.version-bump.json` listing `$1` as its one path. HEAD stays on
+# `main`'s tip and the notes and manifests are this pack's own, so check 1 is the
+# only check that can fail below -- which is what makes the exit code mean one
+# specific thing. `newline="\n"` for the reason bump-version.sh uses it: the
+# fixture sets `core.autocrlf false`, and a CRLF manifest is a file that never
+# matches its commit.
+escape_commit() {
+  "$PYJSON" - "$ESCAPE_FIXTURE/.version-bump.json" "$1" <<'PY'
+import json, sys
+path, listed = sys.argv[1], sys.argv[2]
+with open(path, "w", newline="\n") as f:
+    json.dump({"files": [{"path": listed, "field": "version"}]}, f, indent=2)
+    f.write("\n")
+PY
+  git -C "$ESCAPE_FIXTURE" add -A
+  git -C "$ESCAPE_FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "list $1"
+}
+
+# Run without `--strict`: the stub `gh` fails `--strict` on its own and would
+# mask check 1's 1 with a 1 of its own.
+escape_run() {
+  PATH="$TMP/bin:$PATH" TMPDIR="$ESCAPE_TMP" \
+    bash "$ESCAPE_FIXTURE/scripts/check-release.sh" --head 2>&1
+}
+
+# The traversal itself, and the only leg here backed by a canary. The order of
+# the assertions is the order they matter in: a refusal that still truncated the
+# file is the bug with a better error message.
+escape_commit "$ESCAPE_PATH"
+out="$(escape_run)" && rc=0 || rc=$?
+
+if ! cmp -s "$ESCAPE_PRISTINE" "$ESCAPE_CANARY"; then
+  note FAIL "$ESCAPE_PATH — the gate wrote outside its snapshot"
+  cp "$ESCAPE_PRISTINE" "$ESCAPE_CANARY"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "$ESCAPE_PATH — exit $rc, expected 1 (check 1 refuses the path)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "names a path outside the tree"; then
+  # The wording is the repair. Reported as manifests that disagree -- which is
+  # what it was before the guard, and what it still would be if `snapshot`
+  # merely failed -- it sends the reader to `bump-version.sh --check`, which
+  # reads the list on disk, where the path is fine, and passes.
+  note FAIL "$ESCAPE_PATH — refused, but not as a path outside the tree"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "$ESCAPE_PATH"; then
+  note FAIL "$ESCAPE_PATH — refused without naming the path"
+  fail=1
+else
+  note ok "$ESCAPE_PATH — refused, and the canary is byte-identical"
+fi
+
+# The shapes that are not a bare `..`, sharing the canary above rather than
+# each bringing one: they are aimed at it, so the `cmp` leg is live for every
+# one that can reach it on the platform in hand.
+#
+# Two of these traverse and two cannot, and that spread is the argument for
+# refusing all four. `a/../../x` escapes anywhere. `..\x` escapes on Windows and
+# nowhere else -- bash hands the target to the OS, which reads the backslash as
+# a separator, so the same bytes are one filename on Linux and a directory walk
+# on `windows-latest`, where half of `checks` runs (measured 2026-08-06,
+# git-bash 5.2.37(msys), Windows 10: a 20-byte file two directories up came back
+# 0 bytes and nothing was created under the snapshot). `/etc/...` and `./x` land
+# back inside the snapshot -- but only because `"$SNAPSHOT/$1"` is string
+# concatenation, so a leading slash doubles rather than roots. That is an
+# accident of the join, not a check, and a list carrying either is not
+# describing this tree whatever it happens to land on.
+for listed in 'a/../../canary.txt' '..\canary.txt' '/etc/dovetail-canary' './plugin.json' 'C:/canary.txt'; do
+  escape_commit "$listed"
+  out="$(escape_run)" && rc=0 || rc=$?
+  if ! cmp -s "$ESCAPE_PRISTINE" "$ESCAPE_CANARY"; then
+    note FAIL "$listed — the gate wrote outside its snapshot"
+    cp "$ESCAPE_PRISTINE" "$ESCAPE_CANARY"
+    fail=1
+  elif [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -qF "names a path outside the tree"; then
+    note ok "$listed"
+  else
+    note FAIL "$listed — not refused as a path outside the tree (exit $rc)"
+    fail=1
+  fi
+done
+
+# The control, and the reason the legs above are about escaping rather than
+# about `.version-bump.json` being unwelcome. Same fixture, same command, a path
+# in the tree: it snapshots, check 1 grades it, and the run passes.
+escape_commit ".claude-plugin/plugin.json"
+out="$(escape_run)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "manifests agree with each other"; then
+  note FAIL ".claude-plugin/plugin.json — an in-tree path no longer snapshots (exit $rc)"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL ".claude-plugin/plugin.json — listed and in the tree, and the run still failed (exit $rc)"
+  fail=1
+else
+  note ok ".claude-plugin/plugin.json — an ordinary path still snapshots and grades"
 fi
 
 echo

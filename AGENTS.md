@@ -214,6 +214,24 @@ already-released check at a pack with no tags and turned that `FAIL` into a
 half was: `bash scripts/check-release.sh <tag>` from a working clone, across a
 rename. A tag push never reaches it, because there the checkout *is* the tag.
 
+**Reading the files out of the commit made the commit an input, and that took a
+fix of its own.** Grading a commit's manifests means asking that commit which
+files they are, so `.version-bump.json` is read from `$SHA` and its `files[].path`
+values become paths the gate opens. `snapshot()` built a redirection target out
+of each one, and bash opens a redirection target *before* the command on the line
+runs — so a listed `../x` truncated `x` outside the snapshot directory and then
+`git show` failed on a path no commit carries, with `mkdir -p` having made the
+directories on the way. The run printed `FAIL`, correctly, about manifests that
+disagree, over a file it was never asked to touch that was already empty; nothing
+in the output mentioned the write. Reproduced 2026-08-06 on Git Bash / Windows
+10: a 36-byte canary outside the snapshot came back 0 bytes. A path now has to be
+relative, normalised and free of `..` before anything is opened, and a list
+naming one outside the tree fails check 1 as itself — `.version-bump.json` names
+a path outside the tree — rather than as manifests that disagree, which would
+send the reader to `bump-version.sh --check`, which reads the list on disk, where
+the path is fine, and passes. The tag was the input everyone looked at; this was
+the other one, and it arrived with the fix above.
+
 **Two reads from the checkout survive, deliberately.** The pack name is read
 there once, before any commit is resolved, because parsing the tag needs a name
 and there is nothing else to take one from yet — that is a shape test against
@@ -247,9 +265,13 @@ working tree bumped to a version neither commit carries, so the two answers are
 different commits, the tagged one is an ancestor HEAD mode must refuse while
 explicit-tag mode must not, and each remaining wrong answer is a different
 version — including the pass direction, where that bump is committed and the
-older tag still has to verify against it. It runs in `checks`; if you add a
-workflow, it will also tell you if a `run:` body reads an attacker-nameable
-context.
+older tag still has to verify against it. It covers the commit-as-input half in
+a second throwaway repository, whose committed `.version-bump.json` lists a path
+escaping the snapshot: the gate has to refuse it *and* leave a canary outside the
+snapshot byte-identical, with the canary fired first so neither assertion can
+pass vacuously. That section names `$TMPDIR` rather than guessing where `..`
+lands. It runs in `checks`; if you add a workflow, it will also tell you if a
+`run:` body reads an attacker-nameable context.
 
 A published tag is a thing other people have installed. When it is wrong, the
 fix is a new version, not a moved tag.
