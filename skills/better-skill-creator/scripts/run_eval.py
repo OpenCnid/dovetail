@@ -110,7 +110,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 from scripts.utils import configure_console, parse_skill_md
@@ -136,6 +136,28 @@ COST_PER_PROBE_USD = {
     "haiku": 0.02,
 }
 DEFAULT_COST_PER_PROBE_USD = 0.20
+
+# Jobs allowed to sit submitted-but-not-yet-collected *beyond* the worker count.
+# Only `num_workers` can be running, so this is the hand-off cushion that keeps a
+# worker from idling between finishing one probe and being handed the next; it is
+# a constant rather than a fraction of the eval set because the thing it must not
+# scale with is exactly the eval set.
+#
+# The cushion buys nothing measurable here, and is kept anyway. Sweeping 0, 1, 2,
+# 3, 4, 8 and 16 at 4, 16 and 32 workers against 50 ms fake probes put every value
+# within +/-0.4% of the unbounded driver at >=92% utilisation -- and 50 ms is some
+# 1200x more adverse than the 60-120 s a real probe takes, so at the real duration
+# the hand-off is unmeasurable by construction. What it costs is visible instead:
+# in steady state the jobs sitting in the pool's queue are exactly the ones a
+# worker can still pick up while `cleanup_owned` is running, so a Ctrl-C strands
+# `min(this, num_workers)` billed sessions -- 0 at buffer 0, 2 at this value,
+# against 9 measured for the unbounded driver at 8 workers. That price belongs to
+# the swallowed-SIGINT defect described at `max_outstanding` below, not to the
+# cushion, and setting this to 0 would be tuning around that bug instead of
+# fixing it. Revisit when the interrupt path is repaired: nothing pins the value,
+# and the suite passes at 0, 1, 2 and 7.
+# (Measured 2026-08-06, CPython 3.13.1, Windows 10 10.0.19045, fake worker.)
+OUTSTANDING_JOB_BUFFER = 2
 
 _TERMINAL = object()
 
@@ -1420,6 +1442,102 @@ def load_eval_set(path: Path) -> list[dict]:
 
 
 # --------------------------------------------------------------------------
+# Probe scheduling arguments
+# --------------------------------------------------------------------------
+
+
+class ProbeArgumentError(ValueError):
+    """A worker or repeat count that cannot describe a run of probes."""
+
+
+def validate_probe_arguments(num_workers, runs_per_query) -> tuple[int, int]:
+    """Check the two counts that decide how much work exists and how much runs.
+
+    Both were coerced rather than checked before, and each coercion produced a
+    run the caller did not ask for:
+
+    * ``max(1, num_workers)`` turned ``0`` and ``-4`` into a *serial* run. A
+      caller who asked for zero workers has a bug in whatever computed it, and
+      one worker is not a reading of zero -- it is the harness picking a number
+      and not saying so. The clamp existed because the bare value reaches
+      ``ThreadPoolExecutor``, which raises ``ValueError: max_workers must be
+      greater than 0`` -- *after* the spend gate has printed a bill and the user
+      has typed "yes".
+    * ``runs_per_query`` was not checked at all. ``0`` yields an empty job list,
+      so every query is scored ``errored`` off zero records and the summary
+      reports a 100% error rate -- which reads as a dead harness rather than as
+      a bad argument. It also prices at zero probes, so ``project_spend`` waves
+      it through every cost gate on the way there.
+
+    ``bool`` is refused although it is an ``int`` subclass: ``True`` would
+    otherwise pass as a one-worker, one-run request, and nothing that produces a
+    boolean here meant a count.
+
+    Raises :class:`ProbeArgumentError` listing every problem found, not just the
+    first -- the two arguments are independent, so a caller who got both wrong
+    hears about both.
+    """
+    problems: list[str] = []
+    for name, value, what in (
+        ("num_workers", num_workers, "how many probes run at once"),
+        ("runs_per_query", runs_per_query, "how many probes each query gets"),
+    ):
+        if isinstance(value, bool):
+            problems.append(
+                f"{name} is a bool ({value!r}), which Python counts as "
+                f"{int(value)}. Nothing that produced a boolean here meant {what}."
+            )
+        elif not isinstance(value, int):
+            problems.append(
+                f"{name} is a {type(value).__name__} ({value!r}), not an integer. "
+                f"It counts {what}."
+            )
+        elif value < 1:
+            problems.append(
+                f"{name} is {value}, and {what} cannot be fewer than 1."
+            )
+
+    if not problems:
+        return num_workers, runs_per_query
+
+    raise ProbeArgumentError(
+        "probe scheduling arguments are not counts this harness can run.\n"
+        "Expected: --num-workers and --runs-per-query are both plain integers of\n"
+        "  1 or more; a boolean is not a count. --num-workers 1 is the documented\n"
+        "  way to read a run one probe at a time, so 1 is legitimate for either.\n"
+        f"Found {len(problems)} problem(s):\n"
+        + "\n".join(f"  - {p}" for p in problems)
+    )
+
+
+def check_probe_arguments(num_workers, runs_per_query) -> None:
+    """Refuse unusable scheduling counts, or exit 1 with an actionable message.
+
+    Called by each CLI *before* ``project_spend``, deliberately. The projection
+    multiplies ``runs_per_query`` into the probe count, so ``--runs-per-query 0``
+    prices the run at $0.00 and passes ``--max-cost`` and ``--confirm-threshold``
+    without asking anything -- and in ``run_loop`` it also opens a browser tab
+    and creates a results directory before the run that measures nothing starts.
+    This is the last point where refusing costs the user nothing.
+
+    Exit 1 is this family's code for input refused before spending, alongside
+    ``load_eval_set`` and the missing-SKILL.md check. It does not cover every bad
+    spelling of these two flags: ``--num-workers abc`` never arrives here at all,
+    because argparse's own ``type=int`` rejects it first and exits **2** -- the
+    code that otherwise means the spend gate refused, so a wrapper reading exit 2
+    as "too expensive, or declined" misreads a typo. That collision is older than
+    this check and is shared by every ``type=int`` and ``type=float`` argument in
+    ``add_probe_arguments``; it is recorded here rather than repaired, because
+    repairing it means changing how the whole parser reports a usage error.
+    """
+    try:
+        validate_probe_arguments(num_workers, runs_per_query)
+    except ProbeArgumentError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+# --------------------------------------------------------------------------
 # Eval driver
 # --------------------------------------------------------------------------
 
@@ -1451,6 +1569,12 @@ def run_eval(
     # refuses, and the missing-`should_trigger` case would not surface until
     # scoring, with every probe already paid for.
     eval_set = validate_eval_set(eval_set)
+    # Same reasoning as the line above, for the same reason: a library caller
+    # (run_loop, a notebook) never passes through main(), so the CLI's refusal
+    # is not this function's refusal. Before the executor exists, because
+    # `max_workers=0` raises out of ThreadPoolExecutor's constructor and a
+    # raise from there arrives as a traceback rather than as a sentence.
+    num_workers, runs_per_query = validate_probe_arguments(num_workers, runs_per_query)
 
     install_cleanup_handlers()
     # A new run is a new decision. Without this an interrupt that stopped an
@@ -1467,60 +1591,138 @@ def run_eval(
         )
 
     records_by_index: dict[int, list[dict]] = {i: [] for i in range(len(eval_set))}
-    jobs = [(i, item, r) for i, item in enumerate(eval_set) for r in range(runs_per_query)]
-    total_jobs = len(jobs)
+    # A generator, never a list. Materializing every (query, run) pair up front
+    # was cheap in itself; submitting all of them was not, and the two used to be
+    # written as one comprehension feeding another. See `max_outstanding` below.
+    queued_jobs = (
+        (i, item, r) for i, item in enumerate(eval_set) for r in range(runs_per_query)
+    )
+    # Computed from the inputs rather than from len(jobs), so the `[n/total]`
+    # denominator is the whole run even though the run is never wholly resident.
+    total_jobs = len(eval_set) * runs_per_query
     completed = 0
 
-    executor = ThreadPoolExecutor(max_workers=max(1, num_workers))
+    # The ceiling on jobs submitted-but-not-yet-collected, and the whole point of
+    # the loop below.
+    #
+    # What scaled with the eval set was the *futures*, not the sessions. A probe
+    # root and its `claude` subprocess are created inside `run_single_query` and
+    # torn down in its `finally`, so concurrent sessions were capped at
+    # `num_workers` before this loop existed exactly as they are after it --
+    # measured, peak concurrent probes was 4 at `num_workers=4` under both the old
+    # driver and this one. What submitting everything up front cost was a live
+    # future and its job tuple per probe, held for the length of the run, and that
+    # is small: 2,045 bytes a job, so 1.19 MiB for a 200-query set at 3 runs
+    # against the ~660 MB its four sessions commit. Memory is the weakest reason
+    # to bound this, and it is named here at its real size so nobody re-derives a
+    # larger one.
+    #
+    # The queue depth also decided how much money a Ctrl-C could still spend. The
+    # pool's workers keep draining while `cleanup_owned` kills the children it
+    # snapshotted, and each worker that frees up starts the next queued job --
+    # a fresh billed session, registered after the snapshot, so neither killed nor
+    # cleaned. With the whole set queued that tail was bounded only by how long
+    # cleanup took; with the window bounded there are at most
+    # OUTSTANDING_JOB_BUFFER jobs left to start at all. That is a bound on the
+    # leak and not a repair of it: the interrupt still never reaches the
+    # cancellation path below, because `install_cleanup_handlers` has already
+    # replaced the handler that would have raised KeyboardInterrupt.
+    max_outstanding = num_workers + OUTSTANDING_JOB_BUFFER
+
+    executor = ThreadPoolExecutor(max_workers=num_workers)
     try:
-        future_to_job = {
-            executor.submit(
-                run_single_query,
-                item["query"],
-                skill_name,
-                description,
-                timeout,
-                model,
-                max_tools,
-                setting_sources,
-                include_partial_messages,
-                permission_mode,
-                scaffold,
-            ): (idx, item, run_idx)
-            for idx, item, run_idx in jobs
-        }
-        for future in as_completed(future_to_job):
-            idx, item, run_idx = future_to_job[future]
-            try:
-                record = future.result()
-            except Exception as exc:  # noqa: BLE001
-                record = {
-                    "query": item["query"],
-                    "probe_id": None,
-                    "status": "error",
-                    "triggered": None,
-                    "stop_reason": "worker_exception",
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "tools": [],
-                    "elapsed_seconds": 0.0,
-                    "cost_usd": None,
-                }
-            record["run_index"] = run_idx
-            record["eval_index"] = idx
-            records_by_index[idx].append(record)
-            completed += 1
-            if on_record:
-                on_record(record)
-            if verbose:
-                mark = {"trigger": "TRIG", "no_trigger": "no  ", "error": "ERR "}[record["status"]]
-                print(
-                    f"[{completed}/{total_jobs}] {mark} exp={item['should_trigger']} "
-                    f"({record['stop_reason']}, {record['elapsed_seconds']}s) "
-                    f"{item['query'][:55]}",
-                    file=sys.stderr,
+        outstanding: dict = {}
+
+        def fill_window() -> None:
+            """Top the window up, taking at most `max_outstanding` at a time."""
+            while len(outstanding) < max_outstanding:
+                try:
+                    idx, item, run_idx = next(queued_jobs)
+                except StopIteration:
+                    return
+                # `run_single_query` stays a bare module-global read at submit
+                # time: the tests substitute the worker with
+                # mock.patch.object(run_eval_mod, "run_single_query", ...), and
+                # binding it any earlier would leave them green while quietly
+                # launching real, billed sessions. Positional for the same
+                # reason -- the in-tree fakes bind
+                # (query, skill_name, skill_description, timeout, *args).
+                future = executor.submit(
+                    run_single_query,
+                    item["query"],
+                    skill_name,
+                    description,
+                    timeout,
+                    model,
+                    max_tools,
+                    setting_sources,
+                    include_partial_messages,
+                    permission_mode,
+                    scaffold,
                 )
-                if record["status"] == "error":
-                    print(f"          error: {record['error']}", file=sys.stderr)
+                outstanding[future] = (idx, run_idx, item)
+
+        fill_window()
+        while outstanding:
+            # FIRST_COMPLETED rather than waiting on a named future: a probe runs
+            # up to --timeout, so blocking on the head of the queue would idle
+            # every other worker behind the slowest one. Batches therefore arrive
+            # in completion order, and the sort below orders each batch within
+            # itself.
+            done, _ = wait(outstanding, return_when=FIRST_COMPLETED)
+            # `wait` hands back a *set*, and a batch holds more than one future
+            # far more often than it sounds -- a worker keeps running while this
+            # thread is refilling and printing, so even a single-worker run
+            # collects two and three at a time. Draining the set directly
+            # reported in set-iteration order, which follows id()-derived hashes
+            # and so varies by platform and by build. That scrambled which query
+            # each `[n/total]` line named: measured over 4 queries x 2 runs at
+            # --num-workers 1, `as_completed` gave q0 q0 q1 q1 q2 q2 q3 q3 every
+            # time and the bare set gave q0 q1 q0 q1 q3 q2 q2 q3. Single-worker
+            # verbose is the mode run_loop points a reader at when a number looks
+            # wrong, so its reading order is worth a sort. Submission order is
+            # exactly (eval index, run index), because that is the order the
+            # generator above yields them in; sorting on it restores the old
+            # sequence identically at one worker, and is strictly more
+            # deterministic than `as_completed` above one.
+            # (Measured 2026-08-06, CPython 3.13.1, Windows 10 10.0.19045.)
+            for future in sorted(done, key=lambda f: outstanding[f][:2]):
+                idx, run_idx, item = outstanding.pop(future)
+                try:
+                    record = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    record = {
+                        "query": item["query"],
+                        "probe_id": None,
+                        "status": "error",
+                        "triggered": None,
+                        "stop_reason": "worker_exception",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "tools": [],
+                        "elapsed_seconds": 0.0,
+                        "cost_usd": None,
+                    }
+                record["run_index"] = run_idx
+                record["eval_index"] = idx
+                records_by_index[idx].append(record)
+                completed += 1
+                if on_record:
+                    on_record(record)
+                if verbose:
+                    mark = {"trigger": "TRIG", "no_trigger": "no  ", "error": "ERR "}[record["status"]]
+                    print(
+                        f"[{completed}/{total_jobs}] {mark} exp={item['should_trigger']} "
+                        f"({record['stop_reason']}, {record['elapsed_seconds']}s) "
+                        f"{item['query'][:55]}",
+                        file=sys.stderr,
+                    )
+                    if record["status"] == "error":
+                        print(f"          error: {record['error']}", file=sys.stderr)
+            # After the batch is fully accounted for, never from a done-callback:
+            # `completed`, the records_by_index append and `on_record` are all
+            # unguarded, and are safe only because this loop is the one thread
+            # that touches them.
+            fill_window()
     except BaseException:
         # Order matters. The flag goes up *before* the shutdown, because
         # cancel_futures only drains what is still queued: a worker that has
@@ -1762,12 +1964,13 @@ def add_probe_arguments(parser: argparse.ArgumentParser) -> None:
     """Arguments shared by run_eval and run_loop, so the two cannot drift."""
     parser.add_argument("--num-workers", type=int, default=4,
                         help="Parallel probes. Each is a full Claude Code session "
-                             "(~165 MB); the old default of 10 was ~2 GB. (default: 4)")
+                             "(~165 MB); the old default of 10 was ~2 GB. Must be 1 "
+                             "or more. (default: 4)")
     parser.add_argument("--timeout", type=int, default=120,
                         help="Seconds per probe. Observed sessions ran 67.5s and 83.1s, "
                              "and a timeout is an error, not a non-trigger. (default: 120)")
     parser.add_argument("--runs-per-query", type=int, default=3,
-                        help="Probes per query (default: 3)")
+                        help="Probes per query. Must be 1 or more. (default: 3)")
     parser.add_argument("--trigger-threshold", type=float, default=0.5,
                         help="Trigger rate at or above which a positive passes (default: 0.5)")
     parser.add_argument("--max-tools", type=int, default=4,
@@ -1830,6 +2033,8 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Print progress to stderr")
     add_probe_arguments(parser)
     args = parser.parse_args()
+
+    check_probe_arguments(args.num_workers, args.runs_per_query)
 
     eval_set = load_eval_set(Path(args.eval_set))
     skill_path = Path(args.skill_path)

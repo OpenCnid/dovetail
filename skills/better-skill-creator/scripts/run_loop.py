@@ -25,6 +25,7 @@ from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.run_eval import (
     add_probe_arguments,
+    check_probe_arguments,
     check_scaffold,
     check_skill_md_encoding,
     load_eval_set,
@@ -451,6 +452,8 @@ def main():
                              "subdirectory here")
     add_probe_arguments(parser)
     args = parser.parse_args()
+
+    check_probe_arguments(args.num_workers, args.runs_per_query)
 
     eval_set = load_eval_set(Path(args.eval_set))
     skill_path = Path(args.skill_path)

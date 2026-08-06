@@ -43,8 +43,11 @@ if str(SKILL_ROOT) not in sys.path:
 from scripts import run_eval as run_eval_mod  # noqa: E402
 from scripts.generate_report import generate_html  # noqa: E402
 from scripts.run_eval import (  # noqa: E402
+    OUTSTANDING_JOB_BUFFER,
     EvalSetError,
+    ProbeArgumentError,
     ScaffoldError,
+    check_probe_arguments,
     check_scaffold,
     check_skill_md_encoding,
     project_spend,
@@ -52,6 +55,7 @@ from scripts.run_eval import (  # noqa: E402
     run_eval,
     run_single_query,
     validate_eval_set,
+    validate_probe_arguments,
     validate_scaffold,
 )
 from scripts.run_loop import split_eval_set  # noqa: E402
@@ -561,6 +565,552 @@ class TestAggregation(unittest.TestCase):
         out = self._run(eval_set, {"positive": ["trigger"]}, runs=2, probe_cost=0.0)
         self.assertIsNotNone(out["summary"]["actual_cost_usd"])
         self.assertEqual(out["summary"]["actual_cost_usd"], 0.0)
+
+
+# Every wait below is bounded. A wedged driver must fail a test, never park a
+# thread in CI: the worker's own gate expires on its own, the test's waits
+# expire, and each test asserts the driver thread actually finished rather than
+# leaving it running.
+WORKER_GATE_SECONDS = 30.0
+WINDOW_WAIT_SECONDS = 20.0
+DRIVER_JOIN_SECONDS = 30.0
+# Long enough for a driver that submits everything up front to have done so,
+# short enough to cost nothing. The race-free check is `peak_outstanding` after
+# the join; this one only makes the stall visible while it is happening.
+WINDOW_SETTLE_SECONDS = 0.5
+
+FAKE_PROBE_COST_USD = 0.01
+
+
+class _WindowProbe:
+    """A fake worker held on one event, plus an executor that counts submissions.
+
+    Nothing here launches a `claude` subprocess. The worker is substituted for
+    ``run_single_query`` as a bare module global, exactly the way the in-tree
+    fakes are, and the executor is a subclass of the one ``run_eval`` reads out
+    of its own module namespace, so counting submissions does not change how
+    they are scheduled.
+
+    Both counters are written on the driver thread only -- ``submit`` and
+    ``on_record`` are both called from it -- so ``submitted - collected`` is
+    exactly ``len(outstanding)`` at the moment a job is submitted.
+    """
+
+    def __init__(self, cost_usd: float = FAKE_PROBE_COST_USD):
+        self.gate = threading.Event()
+        self.lock = threading.Lock()
+        self.cost_usd = cost_usd
+        self.submitted = 0
+        self.collected = 0
+        self.peak_outstanding = 0
+        self.started: list[str] = []
+        self.records: list[dict] = []
+        self.record_threads: set[int] = set()
+        self.gate_timeouts = 0
+        self._marks: dict[int, threading.Event] = {}
+
+    # -- the worker --------------------------------------------------------
+
+    def worker(self, query, skill_name, skill_description, timeout, *args, **kwargs):
+        with self.lock:
+            self.started.append(query)
+        if not self.gate.wait(timeout=WORKER_GATE_SECONDS):
+            with self.lock:
+                self.gate_timeouts += 1
+        # A float, deliberately: `isinstance(r.get("cost_usd"), float)` gates
+        # cost accumulation, so an int here would be skipped silently.
+        return {
+            "query": query,
+            "probe_id": f"{skill_name}-skill-deadbeef",
+            "status": "no_trigger",
+            "triggered": False,
+            "stop_reason": "result",
+            "error": None,
+            "tools": [],
+            "elapsed_seconds": 0.0,
+            "cost_usd": self.cost_usd,
+            "probe_root": None,
+        }
+
+    def release(self):
+        self.gate.set()
+
+    # -- the instrumented executor ----------------------------------------
+
+    def executor_class(self):
+        harness = self
+
+        class CountingExecutor(run_eval_mod.ThreadPoolExecutor):
+            def submit(self, fn, *args, **kwargs):
+                harness._note_submission()
+                return super().submit(fn, *args, **kwargs)
+
+        return CountingExecutor
+
+    def _note_submission(self):
+        with self.lock:
+            self.submitted += 1
+            self.peak_outstanding = max(
+                self.peak_outstanding, self.submitted - self.collected
+            )
+            mark = self._marks.get(self.submitted)
+        if mark is not None:
+            mark.set()
+
+    def at_submission(self, count: int) -> threading.Event:
+        """An event set the moment the *count*-th job is submitted."""
+        mark = threading.Event()
+        with self.lock:
+            if self.submitted >= count:
+                mark.set()
+            else:
+                self._marks[count] = mark
+        return mark
+
+    # -- collection --------------------------------------------------------
+
+    def on_record(self, record):
+        with self.lock:
+            self.collected += 1
+            self.records.append(record)
+            self.record_threads.add(threading.get_ident())
+
+
+def _probe_that_must_not_run(*args, **kwargs):
+    raise AssertionError(
+        "run_single_query was reached: a refused scheduling argument must never "
+        "launch a billed probe"
+    )
+
+
+def _executor_that_must_not_exist(*args, **kwargs):
+    raise AssertionError(
+        "ThreadPoolExecutor was constructed: a refused scheduling argument must "
+        "be refused before any job can be submitted"
+    )
+
+
+class _BoundedRunCase(unittest.TestCase):
+    """Wiring shared by the scheduling tests. No `claude` is ever launched."""
+
+    def harness(self, *, released: bool) -> _WindowProbe:
+        probe = _WindowProbe()
+        if released:
+            probe.release()
+        for attribute, replacement in (
+            ("run_single_query", probe.worker),
+            ("ThreadPoolExecutor", probe.executor_class()),
+        ):
+            patcher = mock.patch.object(run_eval_mod, attribute, replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # Registered before any driver thread exists, so it is the last thing to
+        # run: a worker still parked on the gate is released even if an
+        # assertion aborted the test first.
+        self.addCleanup(probe.release)
+        return probe
+
+    def eval_set(self, n: int) -> list[dict]:
+        # Distinct query strings: duplicates are a separate contract, and they
+        # would make run_eval print a warning this test has no interest in.
+        return [{"query": f"q{i:03d}", "should_trigger": i % 2 == 0} for i in range(n)]
+
+    def drive_in_background(self, probe: _WindowProbe, **kwargs):
+        """Run run_eval on its own thread and hand back (thread, outcome)."""
+        outcome: dict = {}
+
+        def drive():
+            try:
+                outcome["output"] = run_eval(
+                    skill_name="widget-forge",
+                    description=DESCRIPTION,
+                    on_record=probe.on_record,
+                    **kwargs,
+                )
+            except BaseException as exc:  # noqa: BLE001 - reported, not swallowed
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=drive, name="run-eval-driver", daemon=True)
+        thread.start()
+        self.addCleanup(self.finish, probe, thread)
+        return thread, outcome
+
+    def finish(self, probe: _WindowProbe, thread: threading.Thread) -> bool:
+        probe.release()
+        thread.join(timeout=DRIVER_JOIN_SECONDS)
+        return not thread.is_alive()
+
+    def run_bounded(self, probe: _WindowProbe, n_queries: int, runs: int, workers: int):
+        """A whole run, start to finish, with every worker already released."""
+        eval_set = self.eval_set(n_queries)
+        thread, outcome = self.drive_in_background(
+            probe,
+            eval_set=eval_set,
+            num_workers=workers,
+            timeout=5,
+            runs_per_query=runs,
+        )
+        self.assertTrue(
+            self.finish(probe, thread), "the eval driver thread did not finish"
+        )
+        self.assertNotIn("error", outcome, f"run_eval raised: {outcome.get('error')!r}")
+        self.assertEqual(probe.gate_timeouts, 0, "a fake worker sat on its gate")
+        return eval_set, outcome["output"]
+
+
+class TestOutstandingJobWindow(_BoundedRunCase):
+    """The driver keeps at most `num_workers + OUTSTANDING_JOB_BUFFER` jobs
+    submitted-but-not-collected, however large the eval set is.
+
+    The previous driver built `jobs = [(i, item, r) for ...]` and submitted every
+    one of them to the executor in a single dict comprehension before reading any
+    result, draining with `as_completed`. The live *futures* therefore scaled with
+    `len(eval_set) * runs_per_query` rather than with the worker count. Concurrent
+    probe roots and billed `claude` sessions did not: those are created inside
+    `run_single_query` and released in its `finally`, so they were capped at
+    `num_workers` before this window existed exactly as they are after it.
+    """
+
+    def test_the_window_never_exceeds_num_workers_plus_the_buffer(self):
+        """Pins the ceiling on submitted-but-not-collected jobs.
+
+        Against the old code this fails twice over: with every worker parked on
+        a cleared event, no future can complete, so nothing can legitimately be
+        submitted past the window -- yet the old comprehension submitted all 40
+        jobs before the first `as_completed` read, so both the stall assertion
+        and the `peak_outstanding` assertion would see 40 where 5 is the bound.
+        """
+        workers = 3
+        runs = 2
+        eval_set = self.eval_set(20)
+        total_jobs = len(eval_set) * runs
+        window = workers + OUTSTANDING_JOB_BUFFER
+        self.assertLess(window, total_jobs, "the bound must be the binding constraint")
+
+        probe = self.harness(released=False)
+        thread, outcome = self.drive_in_background(
+            probe,
+            eval_set=eval_set,
+            num_workers=workers,
+            timeout=5,
+            runs_per_query=runs,
+        )
+
+        self.assertTrue(
+            probe.at_submission(window).wait(timeout=WINDOW_WAIT_SECONDS),
+            f"the driver never submitted {window} jobs",
+        )
+        # Every worker is still on the gate, so a completion -- and therefore a
+        # further submission -- is impossible. A driver that submits anyway has
+        # no window at all.
+        time.sleep(WINDOW_SETTLE_SECONDS)
+        with probe.lock:
+            stalled_at = probe.submitted
+        self.assertEqual(
+            stalled_at, window,
+            f"submission stalled at {stalled_at}, not at the {window}-job window "
+            f"(total jobs: {total_jobs})",
+        )
+        self.assertEqual(probe.collected, 0, "nothing can be collected behind the gate")
+
+        self.assertTrue(
+            self.finish(probe, thread), "the eval driver thread did not finish"
+        )
+        self.assertNotIn("error", outcome, f"run_eval raised: {outcome.get('error')!r}")
+        self.assertEqual(probe.gate_timeouts, 0, "a fake worker sat on its gate")
+        self.assertLessEqual(
+            probe.peak_outstanding, window,
+            "a job was submitted while the window was already full",
+        )
+        self.assertEqual(probe.submitted, total_jobs, "the run did not drain")
+
+    def test_the_window_tracks_num_workers_rather_than_the_eval_set(self):
+        """A second reading of the same bound at a different worker count.
+
+        With one worker the window is 3, not 12; the old driver submitted 12
+        whatever `--num-workers` said, which is the property this separates out.
+        """
+        workers = 1
+        runs = 3
+        eval_set = self.eval_set(4)
+        total_jobs = len(eval_set) * runs
+        window = workers + OUTSTANDING_JOB_BUFFER
+
+        probe = self.harness(released=False)
+        thread, outcome = self.drive_in_background(
+            probe,
+            eval_set=eval_set,
+            num_workers=workers,
+            timeout=5,
+            runs_per_query=runs,
+        )
+
+        self.assertTrue(
+            probe.at_submission(window).wait(timeout=WINDOW_WAIT_SECONDS),
+            f"the driver never submitted {window} jobs",
+        )
+        time.sleep(WINDOW_SETTLE_SECONDS)
+        with probe.lock:
+            stalled_at = probe.submitted
+        self.assertEqual(stalled_at, window, f"total jobs: {total_jobs}")
+
+        self.assertTrue(
+            self.finish(probe, thread), "the eval driver thread did not finish"
+        )
+        self.assertNotIn("error", outcome, f"run_eval raised: {outcome.get('error')!r}")
+        self.assertLessEqual(probe.peak_outstanding, window)
+        self.assertEqual(probe.submitted, total_jobs)
+
+
+class TestBoundedRunPreservesTheOldBehaviour(_BoundedRunCase):
+    """Everything the window is *not* allowed to change.
+
+    A refill loop that drops a job, repeats one, reorders `results`, or loses a
+    record's cost is a worse defect than the unbounded queue it replaced, and
+    each of those is invisible in a run whose job count fits inside one window.
+    Every case here runs with jobs far exceeding workers, so the generator is
+    refilled many times.
+    """
+
+    def test_every_job_runs_exactly_once_across_a_refilled_window(self):
+        """Pins job conservation across `fill_window` refills.
+
+        The old driver submitted a materialized list once, so a job could not be
+        dropped or repeated by the scheduler; pulling from a generator inside a
+        refill loop is exactly where an off-by-one loses or duplicates one, and
+        a lost job would surface as a silently smaller denominator rather than
+        as an error.
+        """
+        probe = self.harness(released=True)
+        eval_set, output = self.run_bounded(probe, n_queries=12, runs=3, workers=4)
+        total_jobs = len(eval_set) * 3
+
+        self.assertEqual(len(probe.started), total_jobs)
+        self.assertEqual(len(probe.records), total_jobs)
+        for item in eval_set:
+            self.assertEqual(
+                probe.started.count(item["query"]), 3,
+                f"{item['query']} did not run exactly 3 times",
+            )
+        self.assertEqual(
+            sum(row["runs"] + row["errored"] for row in output["results"]), total_jobs
+        )
+        self.assertEqual(output["summary"]["scored_runs"], total_jobs)
+
+    def test_results_stay_in_eval_set_order_across_a_refilled_window(self):
+        """Pins the one ordering guarantee there is.
+
+        Records are collected in completion order, so the only thing keeping
+        `results` aligned with the eval set is that it is rebuilt from
+        `enumerate(eval_set)` afterwards. A refill loop that indexed rows by
+        submission or completion order instead would scramble every row's
+        `should_trigger` against its query.
+        """
+        probe = self.harness(released=True)
+        eval_set, output = self.run_bounded(probe, n_queries=15, runs=2, workers=3)
+
+        rows = output["results"]
+        self.assertEqual(len(rows), len(eval_set))
+        self.assertEqual([row["index"] for row in rows], list(range(len(eval_set))))
+        self.assertEqual(
+            [row["query"] for row in rows], [item["query"] for item in eval_set]
+        )
+        self.assertEqual(
+            [row["should_trigger"] for row in rows],
+            [item["should_trigger"] for item in eval_set],
+        )
+
+    def test_cost_accounting_survives_a_bounded_run(self):
+        """Pins the reported spend against a window that never holds the run.
+
+        Cost is accumulated per record, so a job the refill loop dropped would
+        under-report the bill by exactly one probe with nothing else looking
+        wrong -- the number a user reads to decide whether to run again.
+        """
+        probe = self.harness(released=True)
+        eval_set, output = self.run_bounded(probe, n_queries=10, runs=3, workers=2)
+        total_jobs = len(eval_set) * 3
+
+        self.assertAlmostEqual(
+            output["summary"]["actual_cost_usd"],
+            FAKE_PROBE_COST_USD * total_jobs,
+            places=4,
+        )
+
+    def test_on_record_fires_once_per_job_on_one_thread(self):
+        """Pins the single-threadedness the driver's unguarded state relies on.
+
+        `completed`, the `records_by_index[idx].append` and `on_record` itself
+        carry no lock; they are safe only because the driver loop is the one
+        thread that touches them. Moving the refill into a done-callback -- the
+        obvious way to keep the window full -- would run all three on a pool
+        worker, and the corruption would be intermittent rather than a failure.
+        """
+        probe = self.harness(released=True)
+        eval_set, _output = self.run_bounded(probe, n_queries=12, runs=3, workers=4)
+
+        self.assertEqual(len(probe.records), len(eval_set) * 3)
+        self.assertEqual(
+            len(probe.record_threads), 1,
+            f"on_record ran on {len(probe.record_threads)} threads",
+        )
+        self.assertEqual(
+            sorted(record["eval_index"] for record in probe.records),
+            sorted(idx for idx in range(len(eval_set)) for _ in range(3)),
+        )
+
+    def test_one_worker_remains_a_legal_run(self):
+        """`--num-workers 1` is the repo's own remediation advice -- run_loop's
+        zero-recall warning tells a reader to "re-run one query with
+        --num-workers 1 --verbose before believing it", and this validator's
+        refusal message names it too -- so the new validation must not have made
+        it an error."""
+        self.assertEqual(validate_probe_arguments(1, 1), (1, 1))
+        self.assertIsNone(check_probe_arguments(1, 1))
+
+        probe = self.harness(released=True)
+        eval_set, output = self.run_bounded(probe, n_queries=5, runs=2, workers=1)
+        self.assertEqual(len(probe.records), len(eval_set) * 2)
+        self.assertEqual(output["summary"]["scored_runs"], len(eval_set) * 2)
+
+
+class TestProbeArgumentValidation(unittest.TestCase):
+    """`max(1, num_workers)` turned 0 and -4 into a serial run the caller never
+    asked for, and `runs_per_query` was not checked at all: 0 yields an empty job
+    list, so every query is scored `errored` off zero records and the summary
+    reports a 100% error rate -- a bad argument that reads as a dead harness. It
+    also prices at zero probes, so the spend gate waves it through on the way
+    there.
+    """
+
+    BAD_COUNTS = (0, -1, -4, 1.5, "4", None, True)
+
+    def _refuses(self, **kwargs):
+        """Assert run_eval refuses without reaching a worker or an executor."""
+        with mock.patch.object(
+            run_eval_mod, "run_single_query", _probe_that_must_not_run
+        ), mock.patch.object(
+            run_eval_mod, "ThreadPoolExecutor", _executor_that_must_not_exist
+        ):
+            with self.assertRaises(ProbeArgumentError) as caught:
+                run_eval(
+                    eval_set=[{"query": "a", "should_trigger": True}],
+                    skill_name="widget-forge",
+                    description=DESCRIPTION,
+                    timeout=5,
+                    **kwargs,
+                )
+        return str(caught.exception)
+
+    def test_the_library_entry_point_refuses_an_unusable_worker_count(self):
+        """run_loop and any other caller reach run_eval() directly, so the CLI's
+        refusal is not this function's refusal. Each bad value is refused before
+        a probe is launched: the substituted worker raises AssertionError if it
+        is ever reached, and the substituted executor raises if it is ever
+        constructed, so reaching either fails the test rather than passing it."""
+        for value in self.BAD_COUNTS:
+            with self.subTest(num_workers=value):
+                message = self._refuses(num_workers=value, runs_per_query=1)
+                self.assertIn("num_workers", message)
+                self.assertNotIn("runs_per_query", message)
+
+    def test_the_library_entry_point_refuses_an_unusable_run_count(self):
+        for value in self.BAD_COUNTS:
+            with self.subTest(runs_per_query=value):
+                message = self._refuses(num_workers=1, runs_per_query=value)
+                self.assertIn("runs_per_query", message)
+
+    def test_zero_workers_is_refused_rather_than_clamped_to_one(self):
+        """The clamp is the defect. A caller who asked for zero workers has a bug
+        in whatever computed it, and one worker is not a reading of zero."""
+        message = self._refuses(num_workers=0, runs_per_query=3)
+        self.assertIn("num_workers is 0", message)
+        self.assertIn("cannot be fewer than 1", message)
+
+    def test_zero_runs_per_query_is_refused_rather_than_measuring_nothing(self):
+        message = self._refuses(num_workers=4, runs_per_query=0)
+        self.assertIn("runs_per_query is 0", message)
+
+    def test_a_boolean_is_not_a_count(self):
+        """`True` is an int subclass, so it would otherwise pass as a one-worker,
+        one-run request. Nothing that produces a boolean here meant a count."""
+        with self.assertRaises(ProbeArgumentError) as caught:
+            validate_probe_arguments(True, 3)
+        self.assertIn("bool", str(caught.exception))
+
+    def test_both_problems_are_reported_at_once(self):
+        """The two arguments are independent, so a caller who got both wrong
+        hears about both rather than fixing one and re-running to find the
+        other -- and each re-run is a chance to spend money."""
+        with self.assertRaises(ProbeArgumentError) as caught:
+            validate_probe_arguments(0, 0)
+        message = str(caught.exception)
+        self.assertIn("Found 2 problem(s)", message)
+        self.assertIn("num_workers is 0", message)
+        self.assertIn("runs_per_query is 0", message)
+
+    def test_the_message_names_the_value_that_would_have_worked(self):
+        with self.assertRaises(ProbeArgumentError) as caught:
+            validate_probe_arguments(0, 1)
+        self.assertIn("--num-workers 1", str(caught.exception))
+
+    def test_a_well_formed_pair_passes_through_unchanged(self):
+        for pair in ((1, 1), (4, 3), (16, 10)):
+            with self.subTest(pair=pair):
+                self.assertEqual(validate_probe_arguments(*pair), pair)
+
+    def test_the_cli_gate_exits_1_with_a_sentence_on_stderr(self):
+        """`check_probe_arguments` is what each main() calls. It must exit rather
+        than raise, and say what is wrong rather than traceback."""
+        for pair in ((0, 3), (4, 0), (0, 0), ("4", 3)):
+            with self.subTest(pair=pair):
+                err = io.StringIO()
+                with mock.patch("sys.stderr", err):
+                    with self.assertRaises(SystemExit) as caught:
+                        check_probe_arguments(*pair)
+                self.assertEqual(caught.exception.code, 1)
+                printed = err.getvalue()
+                self.assertIn("Error:", printed)
+                self.assertNotIn("Traceback", printed)
+
+    def test_the_cli_gate_passes_a_usable_pair_silently(self):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            self.assertIsNone(check_probe_arguments(4, 3))
+        self.assertEqual(err.getvalue(), "")
+
+    def test_the_gate_runs_before_the_spend_projection_in_every_cli(self):
+        """`--runs-per-query 0` prices the run at $0.00, so it passes --max-cost
+        and --confirm-threshold without asking anything; in run_loop it also
+        opens a browser tab and creates a results directory before the run that
+        measures nothing starts. Ordered by source line, because ast.walk is
+        breadth-first and not source order."""
+        import ast
+
+        for module in ("run_eval.py", "run_loop.py"):
+            with self.subTest(module=module):
+                tree = ast.parse(
+                    (SKILL_ROOT / "scripts" / module).read_text(encoding="utf-8")
+                )
+                main_fn = next(
+                    n for n in tree.body
+                    if isinstance(n, ast.FunctionDef) and n.name == "main"
+                )
+                order = [
+                    name
+                    for _lineno, name in sorted(
+                        (n.lineno, n.func.id)
+                        for n in ast.walk(main_fn)
+                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    )
+                ]
+                self.assertIn("check_probe_arguments", order, module)
+                self.assertIn("project_spend", order, module)
+                self.assertLess(
+                    order.index("check_probe_arguments"),
+                    order.index("project_spend"),
+                    f"{module}: scheduling counts are checked after the spend gate",
+                )
 
 
 class TestSpendGate(unittest.TestCase):
