@@ -525,7 +525,17 @@ class TestCommandLine(PackagerTestCase):
     def test_plain_run_prints_the_archive_path_on_stdout(self):
         proc = self.run_cli(str(self.skill), str(self.dist))
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.strip(), str(self.dist / "hostile-skill.zip"))
+        # Resolved paths, not strings. package_skill resolves output_dir before
+        # printing it, while self.dist descends from tempfile.mkdtemp(), which on
+        # Windows inherits %TEMP% verbatim -- and that is an 8.3 short name
+        # ("C:\Users\RUNNER~1\...") on any host whose username runs past eight
+        # characters. Both spellings name one file, so comparing them as strings
+        # passes only where the username happens to be short enough not to be
+        # shortened, and fails on a CI runner called "runneradmin".
+        self.assertEqual(
+            Path(proc.stdout.strip()).resolve(),
+            (self.dist / "hostile-skill.zip").resolve(),
+        )
         self.assertIn("Excluded", proc.stderr)
         self.assertIn("Included", proc.stderr)
 
