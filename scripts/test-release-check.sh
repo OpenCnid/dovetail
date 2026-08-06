@@ -29,9 +29,11 @@
 #              throwaway repository built so that those are different commits --
 #              and each mode holds its subject to the standard its own question
 #              needs: `main`'s tip for HEAD mode, anywhere on `main` for a tag.
-#              The third layer is newest and answers a different question from
-#              the other two: not "is this input safe?" but "is this the commit
-#              the answer is about?" See its own block further down.
+#              Every one of the five checks grades that commit too, rather than
+#              the files lying in the working tree. The third layer is newest and
+#              answers a different question from the other two: not "is this
+#              input safe?" but "is this the commit the answer is about?" See its
+#              own blocks further down.
 #
 # The behaviour layer fires its own canary first. Assertions that a file did not
 # appear are free if nothing could have written one, and an unwritable temp
@@ -541,6 +543,128 @@ if printf '%s\n' "$out" | grep -qF "cannot tell an unreleased version from an un
 else
   note FAIL "--head — with no tags at all, the gate passed without saying what it skipped"
   fail=1
+fi
+
+# ------------------------------------------- the tree under the commit
+# The other half of "which commit is this about", and it hid behind the first.
+# Checks 4 and 5 have always read `$SHA`. Checks 1, 2 and 3 read the files on
+# disk -- `cd "$ROOT"` at the top of the gate is what put them there -- and
+# nothing required those to be one commit, or the tree to be clean.
+#
+# Measured before the fix, in this fixture's shape: the tree bumped to 9.9.9 and
+# left uncommitted, a tag of that name pointed at a commit whose own manifests
+# say 0.4.1 and whose RELEASE-NOTES.md has no 9.9.9 entry. The gate printed
+# `release dovetail--v9.9.9 at <that commit>`, five `ok`s, exit 0 -- the
+# manifests agreeing with themselves on disk, the tag matching the disk, the
+# notes entry found on disk, while ancestry and CI were asked about the commit.
+# A tag that says 9.9.9 and installs 0.4.1, waved through by the check whose own
+# comment calls that worse than no tag.
+#
+# Not reachable from a tag push, where the checkout *is* the tag. Reachable from
+# the documented local form -- `bash scripts/check-release.sh <tag>` from a
+# working clone -- and in HEAD mode from uncommitted edits alone, which is the
+# form `workflow_dispatch` would meet if a runner ever carried a dirty tree.
+#
+# The fixture is reused rather than rebuilt: it already has a commit, a later
+# commit, and an `origin/main`. All this adds is a disagreement between what is
+# committed and what is on disk.
+echo
+echo "behaviour — the tree under foot is not the commit under test"
+
+DIRTY_VERSION="9.9.9"
+DIRTY_TAG="${FIXTURE_TAG%%--v*}--v$DIRTY_VERSION"
+COMMITTED_VERSION="${FIXTURE_TAG#*--v}"
+
+bash "$FIXTURE/scripts/bump-version.sh" "$DIRTY_VERSION" >/dev/null
+printf '\n## v%s (2026-08-06)\n\nOn disk, in no commit.\n' "$DIRTY_VERSION" >> "$FIXTURE/RELEASE-NOTES.md"
+git -C "$FIXTURE" tag "$DIRTY_TAG" "$DESCENDANT"
+
+# This section's canary, and it earns its place the same way the last one did: a
+# fixture where the tree and the commit happen to agree would pass every
+# assertion below while testing nothing. `bump-version.sh` writing nowhere, or
+# an editor's line endings defeating the append, both land there quietly.
+DISK_VERSION="$("$PYJSON" -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' \
+  "$FIXTURE/.claude-plugin/plugin.json")"
+COMMIT_VERSION="$(git -C "$FIXTURE" show "$DESCENDANT:.claude-plugin/plugin.json" \
+  | "$PYJSON" -c 'import json,sys;print(json.load(sys.stdin)["version"])')"
+
+if [ "$DISK_VERSION" = "$DIRTY_VERSION" ] && [ "$COMMIT_VERSION" = "$COMMITTED_VERSION" ]; then
+  note ok "fixture: the tree says $DISK_VERSION, $DESCENDANT_SHORT says $COMMIT_VERSION"
+else
+  note FAIL "fixture: tree $DISK_VERSION, commit $COMMIT_VERSION — the assertions below prove nothing"
+  fail=1
+fi
+
+# Explicit-tag mode. The tag resolves to a commit that carries neither the
+# version the tag names nor a notes entry for it, and both of those live in
+# files the working tree also has — with the answer the tree would give being
+# the opposite one. Run without `--strict` so the exit code means the checks:
+# the stub `gh` fails `--strict` on its own and would mask a 1 with a 1.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$DIRTY_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $DIRTY_TAG at $DESCENDANT_SHORT"; then
+  note FAIL "$DIRTY_TAG — did not grade the tagged commit ($DESCENDANT_SHORT)"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "$DIRTY_TAG — exit $rc, expected 1 (that commit carries $COMMIT_VERSION)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "tag says $DIRTY_VERSION, the commit's manifests say $COMMIT_VERSION"; then
+  note FAIL "$DIRTY_TAG — the version check read the tree rather than $DESCENDANT_SHORT"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "RELEASE-NOTES.md has no '## v$DIRTY_VERSION' entry"; then
+  note FAIL "$DIRTY_TAG — the notes check read the tree rather than $DESCENDANT_SHORT"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "uncommitted changes present"; then
+  note FAIL "$DIRTY_TAG — graded the commit without saying the tree differs from it"
+  fail=1
+else
+  note ok "$DIRTY_TAG — version and notes graded on $DESCENDANT_SHORT, not on the tree"
+fi
+
+# HEAD mode's version of the same question, and it is not the same assertion:
+# here the tree does not merely lose a comparison, it never gets to name the
+# subject. The tag name HEAD mode builds decides what checks 2 and 3 grade, and
+# building it from the manifests on disk would have this run announce a release
+# of $DIRTY_VERSION from a commit that has never carried it.
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+
+if printf '%s\n' "$out" | grep -qF "$DIRTY_TAG"; then
+  note FAIL "--head — named the tree's $DIRTY_VERSION as what HEAD would ship"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "checking HEAD as $FIXTURE_TAG"; then
+  note FAIL "--head — did not name $COMMIT_VERSION, the version $DESCENDANT_SHORT carries"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "--head — exit $rc, expected 0 ($COMMIT_VERSION is untagged here and HEAD carries it)"
+  fail=1
+else
+  note ok "--head — an uncommitted bump does not become what HEAD would ship"
+fi
+
+# The control, and the reason the two above are about divergence rather than
+# about 9.9.9 being unwelcome. Commit exactly what was on disk, move the tag to
+# that commit, and the same command on the same version passes.
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=t -c user.email=t@e commit -q -m "release $DIRTY_TAG"
+BUMPED="$(git -C "$FIXTURE" rev-parse HEAD)"
+BUMPED_SHORT="$(git -C "$FIXTURE" rev-parse --short "$BUMPED")"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$BUMPED"
+git -C "$FIXTURE" tag -d "$DIRTY_TAG" >/dev/null
+git -C "$FIXTURE" tag "$DIRTY_TAG" "$BUMPED"
+
+out="$(PATH="$TMP/bin:$PATH" bash "$FIXTURE/scripts/check-release.sh" "$DIRTY_TAG" 2>&1)" && rc=0 || rc=$?
+
+if ! printf '%s\n' "$out" | grep -qF "release $DIRTY_TAG at $BUMPED_SHORT"; then
+  note FAIL "$DIRTY_TAG — committed, but the tag no longer resolves to $BUMPED_SHORT"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "$DIRTY_TAG — committed and tagged, $BUMPED_SHORT still does not pass (exit $rc)"
+  fail=1
+elif printf '%s\n' "$out" | grep -qF "uncommitted changes present"; then
+  note FAIL "$DIRTY_TAG — the tree is clean and the run said otherwise"
+  fail=1
+else
+  note ok "$DIRTY_TAG — committed and tagged, the same version passes"
 fi
 
 echo
