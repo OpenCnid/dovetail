@@ -124,5 +124,17 @@ exists: `checks.yml` runs on commits, so a tag can point at anything, and at
 `0.4.0` it pointed at the commit before four green fixes for as long as nobody
 looked.
 
+**The tag name is input, and the gate treats it as such.** A tag has to read
+`dovetail--v<major>.<minor>.<patch>`, optionally `-<prerelease>`; anything else
+exits 2 before a manifest is opened. That is narrower than `git` — `git` will
+happily create `dovetail--v9.9.9$(id)`, which matches the workflow's
+`dovetail--v*` trigger — and the narrowness is the point. `release.yml` hands
+the tag to the script through `env: RELEASE_TAG` and expands it quoted, because
+`${{ }}` inside a `run:` body substitutes into the shell source before bash
+parses it, and a tag name is chosen by whoever pushes the tag.
+`scripts/test-release-check.sh` holds both halves of that in place and runs in
+`checks`; if you add a workflow, it will also tell you if a `run:` body reads an
+attacker-nameable context.
+
 A published tag is a thing other people have installed. When it is wrong, the
 fix is a new version, not a moved tag.
