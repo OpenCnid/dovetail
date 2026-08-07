@@ -166,10 +166,26 @@ exist and is structurally blind to one that was never made.
 3. Add a row to the README table, and say what it is *for* rather than what it is.
 4. Run `bash scripts/test-skills.sh`. The inventory check fails if `skills/` and
    the lists disagree, and the live layer fails if the body never reaches a
-   session. It exits 2 without running the live layer when it cannot confirm
-   `CLAUDE_CONFIG_DIR` reached the CLI — an exit 2 is not a pass, and the usual
-   cause is a POSIX shell invoking a Windows `claude.exe`, which is what
-   running from WSL does.
+   session. An exit 2 is not a pass, and it now has several causes: no `claude`
+   on `PATH`, an unknown flag, a converter that answers nothing, and the
+   original one — the layer could not confirm `CLAUDE_CONFIG_DIR` reached the
+   CLI. A failed `marketplace add` or `plugin install` exits 1, because those
+   are failures of the thing under test rather than an inability to look.
+
+   A POSIX shell invoking a Windows `claude.exe`, which is what running from WSL
+   does, is handled rather than refused: interop drops any variable not named in
+   `WSLENV` and passes arguments unmodified, so the layer names the variable and
+   converts the argument. Which conversion applies is decided by capability —
+   which converter the shell has, and what `claude` resolves to — never by the
+   name of an operating system, because a distro running a Linux-native CLI
+   needs no conversion and converting for it would break it. For the same
+   reason a Windows-shaped CLI path with no converter present is not refused:
+   with no converter there is no evidence this shell reaches a Windows
+   filesystem at all, and refusing there turned a working native-Linux setup
+   into an exit 2 that told it to install WSL. `--plan` prints the decision and
+   runs nothing. CI runs `--static` as the inventory step and
+   `scripts/test-skills-paths.sh`, which grades the decision with no CLI
+   present; the live layer itself runs nowhere.
 
 Nothing needs to be published elsewhere first, and nothing needs a pin.
 
