@@ -38,6 +38,21 @@ DESIGN NOTES (things that were wrong before, so nobody re-introduces them)
   identical clones visible to each other: measured recall was 1.7% shared
   vs 38.3% isolated with nothing else changed (research/16-own-description.md).
   Nothing is ever written into the user's real ``.claude/``.
+* A probe root bounds *where* a session runs and never bounded *what it may
+  do*. ``--permission-mode`` used to default to unset, which is the CLI's
+  "take this machine's permission settings", and the flag's own help text said
+  so out loud. The session on the other end is driven by an eval set's queries
+  and by the SKILL.md under test, both of which arrive from wherever the skill
+  did, so that default handed third-party text the host's capabilities. The
+  default is now ``dontAsk`` -- see :data:`SAFE_PERMISSION_MODE`, which records
+  why it is that mode and not ``plan`` -- and ``inherit`` is a spelling a caller
+  has to choose, alongside ``--allow-host-permissions``. ``None`` resolves to
+  the safe mode rather than to inheritance, because a caller with no opinion is
+  not a caller asking for one.
+  **This moves the measurement**: a mode changes model behaviour, so numbers
+  from before this change were taken under a different regime and are not
+  comparable with numbers taken after it. Nothing in the tree re-measures them,
+  and the costs in :data:`COST_PER_PROBE_USD` are among them.
 * A probe that does not end in a clean verdict is recorded as ``error`` and
   excluded from scoring. It is never counted as a non-trigger — an errored
   probe passes every negative query for free, which is how a dead harness
@@ -106,6 +121,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 import uuid
@@ -121,6 +137,142 @@ TRIGGER_TOOLS = ("Skill", "SlashCommand", "Read")
 
 PROBE_ROOT_PREFIX = "better-skill-creator-probe-"
 
+# --------------------------------------------------------------------------
+# Permission policy for the sessions this harness launches
+# --------------------------------------------------------------------------
+
+# A probe is not this harness talking to itself. The queries come out of an eval
+# set and the `<skill_content>` block comes out of a SKILL.md, and both arrive
+# from wherever the skill did -- a teammate's repository, a marketplace entry, a
+# downloaded archive. Each probe hands that text to a full Claude Code session
+# running on this machine, under this machine's credentials, and the improvement
+# call in `improve_description.py` hands over the same SKILL.md body again. With
+# no `--permission-mode` a session starts in whatever `permissions.defaultMode`
+# the settings it loaded specify -- which this harness's own argparse help used
+# to describe as "probes otherwise inherit your permission settings and can act."
+# That reading was too broad for a probe and too narrow for the improvement call:
+# a probe drops the user scope with `--setting-sources project,local` and runs in
+# an empty `mkdtemp`, while the improvement call loads every scope in the user's
+# own repository. The unbounded case is the second one.
+#
+# `dontAsk` is the mode written for exactly this caller: "If you set `dontAsk`
+# mode, Claude Code auto-denies every tool call that would otherwise prompt you.
+# Claude runs only actions matching your `permissions.allow` rules, read-only
+# Bash commands, and calls approved by a PreToolUse hook. Use this mode for CI
+# pipelines or restricted environments where you pre-define exactly what Claude
+# may do; the session never waits for input." Denying rather than prompting is
+# what a headless run needs -- a mode that prompts has nobody to ask -- and it
+# "also denies the built-in `AskUserQuestion` tool" for the same reason. In the
+# protected-paths table its row is the only `Denied` of the six.
+#
+# Detection here reads the `tool_use` block the model emits, not what the
+# permission layer then does with it, so a denied call is still a recorded
+# routing decision. Nothing on that page says `dontAsk` puts instructions into
+# the session the way `plan` and `auto` do -- but that is an absence of evidence,
+# not a measurement, and no run has compared trigger rates under it.
+#
+# **`plan` is not the safe mode, and reading it as one is the error this
+# paragraph exists to stop happening twice.** The published table gives
+# `default` as "Reads only" and `plan` as "Reads, plus classifier-approved
+# commands when auto mode is available" -- so where auto mode is available,
+# `plan` runs shell commands unprompted that a session in Manual mode would have
+# prompted for. It is instruction rather than enforcement at the joint that
+# matters: "In sessions with bypass permissions available, Claude Code also
+# doesn't enforce plan mode's blocks. Claude is still instructed to plan without
+# editing, but a file edit or shell command it attempts during planning runs
+# without prompting." And it puts a planning preamble in front of the routing
+# decision this harness is built to measure. The old spend banner recommended it
+# and the old help text gave it as the worked example; that was wrong on all
+# three counts.
+#
+# **What this does not close.** Under `dontAsk` the allow rules are what still
+# grants, along with two things no rule is needed for: the built-in read-only
+# Bash set, and anything a PreToolUse hook approves. For a probe that is very
+# nearly nothing -- an empty `mkdtemp` cwd, user scope dropped. For the
+# improvement call it is more than nothing, because that call inherits the
+# parent's cwd and passes no `--setting-sources`, so a permissive rule of the
+# user's own is still in force. The CLI's `--tools ""` removes the *built-in*
+# tools from the request and would close most of the rest; it "doesn't affect
+# MCP tools", so closing those needs `--disallowedTools "mcp__*"` as well. It is
+# named here rather than used because this change did not verify the resulting
+# session, only that the flag parses (`claude --tools "" --help` exits 0).
+# (Quoted 2026-08-06 from https://code.claude.com/docs/en/permission-modes.md
+# and /docs/en/cli-reference.md, read against `claude --help` on Claude Code
+# 2.1.223. Documented behaviour, not observed -- no live probe was run for this
+# change, so what a session does under a mode is what those pages say it does.)
+SAFE_PERMISSION_MODE = "dontAsk"
+
+# The one value meaning "pass no --permission-mode at all, and take whatever the
+# host's settings allow" -- the behaviour every caller used to get for free.
+#
+# It is spelled out rather than left as `None` because `None` is what a caller
+# passes when it has no opinion, and a caller with no opinion must land on the
+# safe mode. The old signature could not tell those two apart, so "I did not
+# think about permissions" and "I want the host's permissions" were the same
+# argument and resolved to the second one. Worth naming precisely: the old
+# default was not `manual`, it was *whatever this machine's
+# `permissions.defaultMode` says*, which a settings file can set to `acceptEdits`.
+INHERIT_PERMISSION_MODE = "inherit"
+
+# Modes a session may be launched with when nobody has said otherwise.
+#
+# `manual` and `default` are one mode under two spellings -- "Its config value is
+# `default`", and Manual is the name the CLI shows -- and the row is "Reads only".
+# A headless session cannot answer the prompt everything else raises, so neither
+# can act beyond that row. Both bound the *prompting* path rather than action as
+# such: an allow rule pre-approves under them exactly as it does under `dontAsk`,
+# so all three carry the residual named above.
+#
+# `default` is carried as well as `manual` because it is the spelling with no
+# version floor. The `manual` alias "require[s] Claude Code v2.1.200 or later",
+# so on a CLI old enough to reject `dontAsk` it is just as likely to be rejected,
+# and `default` is then the only safe value that still parses. (Verified
+# accepted: `claude --permission-mode default --help` exits 0 on 2.1.223, though
+# `claude --help` omits it from the choices it prints. 2026-08-06.)
+#
+# Neither is the default here, because a mode that prompts turns a probe into an
+# error rather than a measurement.
+SAFE_PERMISSION_MODES = frozenset({SAFE_PERMISSION_MODE, "manual", "default"})
+
+# Why each remaining mode needs --allow-host-permissions, in the words of the
+# page that documents it. A refusal quotes the row rather than saying "unsafe":
+# the user chose the mode on purpose and is owed the reason it was refused.
+#
+# These strings are printed inside hand-wrapped blocks, so every consumer wraps
+# them at the point of use rather than assuming a width.
+PERMISSION_MODE_RISK = {
+    "acceptEdits":
+        "auto-approves file edits and the common filesystem commands (mkdir, "
+        "touch, rm, rmdir, mv, cp, sed) inside the working directory",
+    "auto":
+        "auto-approves reads and working-directory edits outright and sends the "
+        "rest to a background classifier, which approves what it does not flag",
+    "bypassPermissions":
+        "disables the permission prompts and safety checks, so tool calls "
+        "execute immediately, including writes to protected paths",
+    "plan":
+        "runs \"Reads, plus classifier-approved commands when auto mode is "
+        "available\" -- more than Manual mode's \"Reads only\" -- and its blocks "
+        "are not enforced in sessions where bypass permissions are available",
+    INHERIT_PERMISSION_MODE:
+        "is this harness's name for passing no --permission-mode at all, so each "
+        "session starts in whatever permissions.defaultMode the settings it "
+        "loaded specify",
+}
+
+# Every value this harness accepts, bound to `choices=` so a typo is a usage
+# error rather than a mode the CLI rejects one probe at a time, after the spend
+# gate has already been passed.
+#
+# One value here is not the CLI's, deliberately: `inherit` is this harness's
+# sentinel for "omit the flag" and is never forwarded -- `claude
+# --permission-mode inherit` is an error, correctly. Every other member is a
+# value the CLI takes, `default` included, which `claude --help` accepts without
+# listing. (Checked with `claude --permission-mode <value> --help`, which
+# validates before printing and starts no session; Claude Code 2.1.223,
+# 2026-08-06.)
+PERMISSION_MODES = tuple(sorted(SAFE_PERMISSION_MODES | set(PERMISSION_MODE_RISK)))
+
 # Rough per-probe cost, USD, used only for the pre-flight projection.
 # Sources: opus measured at $0.4267 and $0.3978 over 16-17 turns
 # (research/02-trigger-eval.md F15); haiku measured at $0.0125 warm / $0.0579
@@ -130,6 +282,14 @@ PROBE_ROOT_PREFIX = "better-skill-creator-probe-"
 # early is killed before its `result` event and costs less, so these numbers are
 # an upper bound per probe. Estimates for a warning, not an invoice — override
 # with --cost-per-probe.
+#
+# Every one of those numbers was measured before SAFE_PERMISSION_MODE existed,
+# i.e. with no --permission-mode passed at all. A mode changes how many turns a
+# session takes and therefore what it costs, so these are the old regime's
+# figures carried forward unremeasured; re-measuring them means paying for the
+# runs. They are a projection the user is asked to approve, and --cost-per-probe
+# is the override, so carrying them is a stale warning rather than a stale
+# invoice. (Noted 2026-08-06.)
 COST_PER_PROBE_USD = {
     "opus": 0.41,
     "sonnet": 0.09,
@@ -907,8 +1067,9 @@ def run_single_query(
     max_tools: int = 4,
     setting_sources: str | None = "project,local",
     include_partial_messages: bool = True,
-    permission_mode: str | None = None,
+    permission_mode: str | None = SAFE_PERMISSION_MODE,
     scaffold: str | None = None,
+    allow_host_permissions: bool = False,
 ) -> dict:
     """Run one probe and return a record.
 
@@ -980,8 +1141,15 @@ def run_single_query(
             cmd.append("--include-partial-messages")
         if setting_sources:
             cmd.extend(["--setting-sources", setting_sources])
-        if permission_mode:
-            cmd.extend(["--permission-mode", permission_mode])
+        # Resolved rather than tested for truth. A falsy `permission_mode` used
+        # to mean "omit the flag", which made "I never thought about this" and
+        # "give this session my machine's permissions" the same argument -- and
+        # every caller that had not thought about it got the second reading.
+        # `inherit` is now the only spelling that omits the flag, and reaching
+        # it takes the opt-in as well.
+        mode = validate_permission_mode(permission_mode, allow_host_permissions)
+        if mode != INHERIT_PERMISSION_MODE:
+            cmd.extend(["--permission-mode", mode])
         if model:
             cmd.extend(["--model", model])
 
@@ -1246,12 +1414,24 @@ def project_spend(
     confirm_threshold: float,
     assume_yes: bool,
     label: str = "trigger eval",
+    permission_mode: str = SAFE_PERMISSION_MODE,
 ) -> dict:
     """Print the projected spend and gate the run. Returns the projection.
 
     Raises SystemExit when the projection exceeds --max-cost, or when it exceeds
     --confirm-threshold and no confirmation is available.
+
+    ``permission_mode`` is displayed rather than enforced -- ``check_permission_mode``
+    has already refused an unbounded run by the time this is called. It is here
+    because this banner is the one screen a user reads before agreeing to spend,
+    and "what will these sessions be allowed to do" belongs next to "what will
+    they cost". The mode is also the variable that makes two runs incomparable,
+    so it is named at the moment somebody decides to produce a number.
     """
+    # Resolved the same way every other consumer resolves it, so a library
+    # caller that skipped `check_permission_mode` prices a run under the mode it
+    # will actually get rather than under the word `None`.
+    permission_mode = SAFE_PERMISSION_MODE if permission_mode is None else permission_mode
     probes = n_queries * runs_per_query * iterations
     if cost_per_probe is None:
         per_probe, provenance = estimate_cost_per_probe(model)
@@ -1275,11 +1455,53 @@ def project_spend(
         f"  --max-cost           ${max_cost:.2f}",
         "",
         "  Each probe is a full Claude Code session billed to your subscription,",
-        "  running with cwd in a throwaway temp directory. Probes inherit your",
-        "  permission settings; pass --permission-mode plan to bound what they",
-        "  can do at the cost of comparability with prior measurements.",
+        "  running with cwd in a throwaway temp directory.",
         "",
     ]
+    if permission_mode == INHERIT_PERMISSION_MODE:
+        lines += [
+            "  They are launched with no --permission-mode, so each one starts in",
+            "  whatever permissions.defaultMode the settings it loads specify.",
+            "  Nothing here bounds what a query or a SKILL.md body persuades one",
+            "  to do. This is also the only setting whose numbers are comparable",
+            "  with the ones recorded in this tree, which were all measured before",
+            "  any mode was passed.",
+            "",
+        ]
+    elif permission_mode == SAFE_PERMISSION_MODE:
+        lines += [
+            f"  They run under --permission-mode {permission_mode}, which auto-denies",
+            "  any call it was not pre-approved for rather than acting.",
+            "  Comparable only with runs made under the same mode -- a mode changes",
+            "  model behaviour, so a number measured under a different one is a",
+            "  different measurement.",
+            "",
+        ]
+    elif permission_mode in SAFE_PERMISSION_MODES:
+        lines += [
+            f"  They run under --permission-mode {permission_mode}, which grants reads",
+            "  and prompts for everything else -- and a headless session has nobody",
+            "  to prompt, so a probe that reaches for more ends as an error rather",
+            "  than as a measurement. Comparable only with runs made under the same",
+            "  mode.",
+            "",
+        ]
+    else:
+        # `.get` rather than `[...]`: this banner describes a decision somebody
+        # else already made, and a mode it has no sentence for must not turn the
+        # spend gate into a KeyError. A library caller that skipped
+        # `check_permission_mode` and passed `None` reached exactly that.
+        risk = PERMISSION_MODE_RISK.get(
+            permission_mode, "this harness has no description of"
+        )
+        lines += [
+            f"  They run under --permission-mode {permission_mode}, which",
+            *textwrap.wrap(
+                risk + ".", width=72, initial_indent="  ", subsequent_indent="  ",
+            ),
+            "  Comparable only with runs made under the same mode.",
+            "",
+        ]
     print("\n".join(lines), file=sys.stderr)
 
     projection = {
@@ -1540,6 +1762,105 @@ def check_probe_arguments(num_workers, runs_per_query) -> None:
         raise SystemExit(1)
 
 
+class PermissionModeError(ValueError):
+    """A session would be launched able to act, and nobody asked for that."""
+
+
+def validate_permission_mode(
+    permission_mode: str | None,
+    allow_host_permissions: bool = False,
+) -> str:
+    """Return the mode a session may be launched with, or refuse.
+
+    ``None`` is "no opinion" and resolves to :data:`SAFE_PERMISSION_MODE`. That
+    mapping is the whole security change and it lives here rather than in the
+    argv builder, so a library caller -- ``run_loop``, a notebook, a wrapper
+    script -- lands on the same posture as the CLI without having to know the
+    flag exists. Reaching the host's permission settings now takes the word
+    ``inherit`` and the opt-in together; neither on its own gets there, and
+    silence never does.
+
+    ``allow_host_permissions`` is the opt-in, and it gates every mode outside
+    :data:`SAFE_PERMISSION_MODES` rather than ``inherit`` alone. ``acceptEdits``
+    and ``bypassPermissions`` are named modes, not inheritance, and they hand a
+    probe more than inheriting does on a machine whose settings are strict --
+    so a gate that only watched ``inherit`` would be a gate around the least
+    dangerous way through.
+
+    It is compared against ``True`` rather than tested for truth, so a caller
+    that read it out of an environment variable or a config file does not open
+    the gate with the string ``"false"``. Every truthy non-``bool`` fails closed;
+    argparse's ``store_true`` hands over a real ``bool``, so no CLI path is
+    affected.
+    """
+    mode = SAFE_PERMISSION_MODE if permission_mode is None else str(permission_mode)
+    if mode not in PERMISSION_MODES:
+        raise PermissionModeError(
+            f"{mode!r} is not a permission mode this harness knows.\n"
+            f"Expected one of: {', '.join(PERMISSION_MODES)}."
+        )
+    if mode in SAFE_PERMISSION_MODES or allow_host_permissions is True:
+        return mode
+    # Wrapped here rather than stored pre-wrapped: the risk strings are one
+    # sentence each and every consumer prints them into a differently indented
+    # block. `Error: ` is seven characters, which is the hanging indent below.
+    headline = textwrap.fill(
+        f"--permission-mode {mode} {PERMISSION_MODE_RISK[mode]}.",
+        width=79, initial_indent=" " * 7, subsequent_indent=" " * 7,
+    )[7:]
+    raise PermissionModeError(
+        f"{headline}\n"
+        f"       These sessions are driven by the skill's own text -- the SKILL.md\n"
+        f"       body under test, and the eval set written against it -- which came\n"
+        f"       from wherever the skill did, and they run on this machine under\n"
+        f"       its credentials.\n"
+        f"Fix:   drop the flag to run under --permission-mode {SAFE_PERMISSION_MODE}, "
+        f"the default,\n"
+        f"       which denies every call it was not pre-approved for; or pass\n"
+        f"       --allow-host-permissions as well, to choose this mode deliberately."
+    )
+
+
+def check_permission_mode(
+    permission_mode: str | None,
+    allow_host_permissions: bool = False,
+) -> str:
+    """Refuse an unbounded session, or exit 1 with an actionable message.
+
+    Called by each CLI *before* ``project_spend``, for the reason
+    ``check_probe_arguments`` gives: this is the last point where refusing costs
+    the user nothing. Raised from inside a probe instead, it arrives once per
+    probe through ``run_single_query``'s blanket handler as ``status: "error"``
+    -- indistinguishable from a rate limit -- and only after a bill has been
+    approved.
+
+    Exit 1, the family's code for input refused before spending.
+    """
+    try:
+        mode = validate_permission_mode(permission_mode, allow_host_permissions)
+    except PermissionModeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if mode not in SAFE_PERMISSION_MODES:
+        # The same sentence the refusal would have printed, because the run that
+        # goes ahead is the one where knowing it matters. Naming the mode alone
+        # would make the surviving message the less informative of the two.
+        detail = textwrap.fill(
+            f"--allow-host-permissions was given, so every session launched by this "
+            f"run takes --permission-mode {mode}, which "
+            f"{PERMISSION_MODE_RISK[mode]}.",
+            width=79, initial_indent=" " * 9, subsequent_indent=" " * 9,
+        )[9:]
+        print(
+            f"Warning: {detail}\n"
+            f"         The SKILL.md body under test and the eval set written against\n"
+            f"         it decide what those sessions try to do. Nothing further in\n"
+            f"         this tool bounds them.",
+            file=sys.stderr,
+        )
+    return mode
+
+
 # --------------------------------------------------------------------------
 # Eval driver
 # --------------------------------------------------------------------------
@@ -1557,10 +1878,11 @@ def run_eval(
     max_tools: int = 4,
     setting_sources: str | None = "project,local",
     include_partial_messages: bool = True,
-    permission_mode: str | None = None,
+    permission_mode: str | None = SAFE_PERMISSION_MODE,
     scaffold: str | None = None,
     verbose: bool = False,
     on_record=None,
+    allow_host_permissions: bool = False,
 ) -> dict:
     """Run the full eval set and return results.
 
@@ -1578,6 +1900,11 @@ def run_eval(
     # `max_workers=0` raises out of ThreadPoolExecutor's constructor and a
     # raise from there arrives as a traceback rather than as a sentence.
     num_workers, runs_per_query = validate_probe_arguments(num_workers, runs_per_query)
+    # And once here rather than once per probe. `run_single_query` resolves the
+    # mode again for itself, but a refusal raised in there is caught by its
+    # blanket handler and recorded as one errored probe among many; raised here
+    # it stops the run before a session is bought.
+    permission_mode = validate_permission_mode(permission_mode, allow_host_permissions)
 
     install_cleanup_handlers()
     # A new run is a new decision. Without this an interrupt that stopped an
@@ -1663,6 +1990,7 @@ def run_eval(
                     include_partial_messages,
                     permission_mode,
                     scaffold,
+                    allow_host_permissions,
                 )
                 outstanding[future] = (idx, run_idx, item)
 
@@ -1984,12 +2312,27 @@ def add_probe_arguments(parser: argparse.ArgumentParser) -> None:
                         help="Passed to claude -p. The default drops your personal skills "
                              "and plugins so an installed copy of the skill under test "
                              "cannot shadow the probe. Empty string to inherit everything.")
-    parser.add_argument("--permission-mode", default=None,
-                        help="Passed to claude -p (e.g. 'plan'). This is the blast-radius "
-                             "knob the spend projection points at: probes otherwise inherit "
-                             "your permission settings and can act. Unset by default because "
-                             "it changes model behaviour and so breaks comparability with "
-                             "prior measurements.")
+    parser.add_argument("--permission-mode", default=SAFE_PERMISSION_MODE,
+                        choices=PERMISSION_MODES,
+                        help=f"Passed to claude -p. This is the blast-radius knob: every "
+                             f"session this harness launches is driven by an eval set and a "
+                             f"SKILL.md that came from wherever the skill did, and runs here. "
+                             f"'{SAFE_PERMISSION_MODE}' is the default because it auto-denies "
+                             f"any call it was not pre-approved for and never waits for an "
+                             f"answer nobody is there to give. "
+                             f"'{INHERIT_PERMISSION_MODE}' passes no flag at all and takes "
+                             f"your permission settings. Any mode outside "
+                             f"{', '.join(sorted(SAFE_PERMISSION_MODES))} needs the "
+                             f"--allow-host-permissions opt-in as well; 'plan' is one of "
+                             f"them, and is looser than it sounds. A mode changes model "
+                             f"behaviour, so a run is comparable only with runs made under "
+                             f"the same one.")
+    parser.add_argument("--allow-host-permissions", action="store_true",
+                        help=f"Permit a --permission-mode outside "
+                             f"{', '.join(sorted(SAFE_PERMISSION_MODES))}, including "
+                             f"'{INHERIT_PERMISSION_MODE}'. Without this, a mode that lets a "
+                             f"session act on this machine is refused before anything is "
+                             f"spent. Pass it deliberately.")
     parser.add_argument("--scaffold", default=None,
                         help="Directory copied into each probe root so file paths named in "
                              "queries resolve. Whatever is copied must be a real file or "
@@ -2039,6 +2382,9 @@ def main():
     args = parser.parse_args()
 
     check_probe_arguments(args.num_workers, args.runs_per_query)
+    permission_mode = check_permission_mode(
+        args.permission_mode, args.allow_host_permissions
+    )
 
     eval_set = load_eval_set(Path(args.eval_set))
     skill_path = Path(args.skill_path)
@@ -2067,6 +2413,7 @@ def main():
         max_cost=args.max_cost,
         confirm_threshold=args.confirm_threshold,
         assume_yes=args.yes,
+        permission_mode=permission_mode,
     )
 
     try:
@@ -2082,9 +2429,10 @@ def main():
             max_tools=args.max_tools,
             setting_sources=args.setting_sources or None,
             include_partial_messages=not args.no_partial_messages,
-            permission_mode=args.permission_mode,
+            permission_mode=permission_mode,
             scaffold=args.scaffold,
             verbose=args.verbose,
+            allow_host_permissions=args.allow_host_permissions,
         )
     except KeyboardInterrupt:
         # run_eval has already cancelled the queue, stopped the workers from

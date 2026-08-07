@@ -34,6 +34,11 @@ if str(SKILL_ROOT) not in sys.path:
     sys.path.insert(0, str(SKILL_ROOT))
 
 from scripts.improve_description import improve_description  # noqa: E402
+from scripts.run_eval import (  # noqa: E402
+    INHERIT_PERMISSION_MODE,
+    SAFE_PERMISSION_MODE,
+    PermissionModeError,
+)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 STUB = FIXTURES / "stub_claude.py"
@@ -308,6 +313,63 @@ class TestSubprocessContract(OptimizerHarness):
         self.assertEqual(len(self.prompts()), 1)
 
 
+class TestPermissionPolicy(OptimizerHarness):
+    """This call was the one `claude -p` in the tree with no permission control
+    at all, and it is the looser of the two: a probe runs in a fresh temp
+    directory under `--setting-sources project,local`, while this one inherits
+    the caller's cwd -- the user's own repository -- and loads every settings
+    scope. Its prompt embeds the whole SKILL.md body under test, which came from
+    wherever the skill did.
+
+    Argv only. Nothing here runs a model."""
+
+    def test_the_optimizer_call_is_bounded_by_default(self):
+        self.improve(results([row("q", True, False)]))
+        argv = self.prompts()[0]["argv"]
+        self.assertIn("--permission-mode", argv)
+        self.assertEqual(
+            argv[argv.index("--permission-mode") + 1], SAFE_PERMISSION_MODE
+        )
+
+    def test_the_rewrite_call_is_bounded_too(self):
+        """The over-1024-character net makes a second billed session. It is a
+        separate `_call_claude` and is exactly the one a threaded parameter
+        gets forgotten in."""
+        self.control(optimizer_responses=[tagged("L" * 1100), tagged("S" * 200)])
+        self.improve(results([row("q", True, False)]))
+        calls = self.prompts()
+        self.assertEqual(len(calls), 2, calls)
+        for call in calls:
+            argv = call["argv"]
+            self.assertEqual(
+                argv[argv.index("--permission-mode") + 1], SAFE_PERMISSION_MODE
+            )
+
+    def test_none_means_no_opinion_and_lands_on_the_safe_mode(self):
+        self.improve(results([row("q", True, False)]), permission_mode=None)
+        argv = self.prompts()[0]["argv"]
+        self.assertEqual(
+            argv[argv.index("--permission-mode") + 1], SAFE_PERMISSION_MODE
+        )
+
+    def test_inheriting_host_permissions_needs_the_opt_in(self):
+        with self.assertRaises(PermissionModeError) as ctx:
+            self.improve(
+                results([row("q", True, False)]),
+                permission_mode=INHERIT_PERMISSION_MODE,
+            )
+        self.assertIn("--allow-host-permissions", str(ctx.exception))
+        self.assertEqual(self.prompts(), [], "a session was bought under a refused mode")
+
+    def test_the_opt_in_is_what_omits_the_flag(self):
+        self.improve(
+            results([row("q", True, False)]),
+            permission_mode=INHERIT_PERMISSION_MODE,
+            allow_host_permissions=True,
+        )
+        self.assertNotIn("--permission-mode", self.prompts()[0]["argv"])
+
+
 class TestEncoding(OptimizerHarness):
     """C7. `subprocess.run(text=True)` without an explicit encoding uses
     `locale.getpreferredencoding` -- cp1252 on this project's reference machine.
@@ -462,6 +524,39 @@ class TestCli(OptimizerHarness):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         json.loads(proc.stdout)
         self.assertIn("Current:", proc.stderr)
+
+    def test_cli_bounds_the_call_without_being_asked_to(self):
+        self.control(optimizer_response=tagged("a fresh description"))
+        proc = self._run(self._payload())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        argv = self.prompts()[0]["argv"]
+        self.assertEqual(
+            argv[argv.index("--permission-mode") + 1], SAFE_PERMISSION_MODE
+        )
+
+    def test_cli_refuses_to_inherit_host_permissions_without_the_opt_in(self):
+        self.control(optimizer_response=tagged("a fresh description"))
+        proc = self._run(
+            self._payload(), extra=["--permission-mode", INHERIT_PERMISSION_MODE]
+        )
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("--allow-host-permissions", proc.stderr)
+        self.assertEqual(self.prompts(), [], "a session was bought under a refused mode")
+
+    def test_cli_opt_in_reaches_the_child_and_says_so(self):
+        self.control(optimizer_response=tagged("a fresh description"))
+        proc = self._run(self._payload(), extra=[
+            "--permission-mode", INHERIT_PERMISSION_MODE, "--allow-host-permissions",
+        ])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Warning:", proc.stderr)
+        self.assertNotIn("--permission-mode", self.prompts()[0]["argv"])
+
+    def test_cli_refuses_an_unknown_mode_as_a_usage_error(self):
+        proc = self._run(self._payload(), extra=["--permission-mode", "readOnly"])
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
 
 
 if __name__ == "__main__":

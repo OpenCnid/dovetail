@@ -121,7 +121,8 @@ python -m scripts.run_loop \
 
 **Decide the cost before you start, because the defaults will stop you.** The obvious settings — 20
 queries × 3 runs × 5 iterations — are 300 probes. Measured, that is roughly **$123 on Opus, $27 on
-Sonnet, $6 on Haiku**. The loop projects this and refuses above `--max-cost` (default `10.0`) rather
+Sonnet, $6 on Haiku** — figures taken before `--permission-mode` had a default, and not re-measured
+since. The loop projects this and refuses above `--max-cost` (default `10.0`) rather
 than discovering it halfway through, so the full-fat invocation does not run as written unless you
 raise the cap deliberately.
 
@@ -150,6 +151,30 @@ version registered its probes in whatever `.claude/` directory it found by walki
 could be the person's project, their home directory, or a drive root — leaving files behind and
 letting concurrent sessions see them. Isolation also fixed a measurement problem, because probes
 sharing one directory saw each other's entries and scored each other's skills.
+
+**A temp root bounds where a session runs, not what it may do — `--permission-mode` is the half that
+does.** Every session this tool launches, probes and the improvement call alike, is driven by text
+that arrived with the skill: the eval set's queries and the SKILL.md body under test. `--permission-mode`
+defaults to `dontAsk`, which the CLI documents as auto-denying any call the session was not
+pre-approved for, and as never waiting for an answer nobody is there to give. What this repository
+does is pass that flag; what the mode then does is documented behaviour, quoted from
+[the permission-modes page](https://code.claude.com/docs/en/permission-modes.md) and not measured here.
+To hand those sessions this machine's permission settings instead, pass `--permission-mode inherit`
+**and** `--allow-host-permissions`; the mode alone is refused before anything is spent, and the opt-in
+alone changes nothing. The same opt-in is what unlocks `acceptEdits`, `auto`, `bypassPermissions` and
+`plan`, several of which hand a session more than inheriting does on a machine whose settings are
+strict.
+
+Two things worth knowing rather than finding out:
+
+- **`plan` is not the cautious choice, despite the name.** The published mode table gives `default` —
+  spelled `manual` on the command line — as "Reads only", and `plan` as "Reads, plus
+  classifier-approved commands when auto mode is available", and plan mode's blocks are not enforced
+  in sessions where bypass permissions are available. It needs `--allow-host-permissions` like the rest.
+- **A mode changes model behaviour, so it changes the measurement.** Scores are comparable only across
+  runs made under the same mode. Numbers recorded here and in `scripts/run_eval.py` predate this
+  default and were taken with no `--permission-mode` at all; they have not been re-measured, because
+  re-measuring them means paying for the runs. Treat them as the old regime's figures.
 
 ## When a run measures nothing
 
@@ -183,6 +208,11 @@ malfunction.
 
 Check that probes actually ran before believing any score. A run where everything errored can still
 produce a well-formed report.
+
+Say which `--permission-mode` the run used when you report a number, and do not compare it against a
+number taken under a different one. The projection banner names the mode directly beneath the cost,
+which is the one place a reader sees both facts together — and it is the *only* place, because
+`results.json` records no mode. If you save a run, save the mode beside it.
 
 Report the held-out number, not the training number, and say which is which. If the tool selected a
 candidate that only tied the original, say that too — a tie means the optimization found nothing,

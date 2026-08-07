@@ -319,7 +319,11 @@ vocabulary with the description.
 
 Read `references/description-optimization.md` before starting. It has how to write and hold out the
 query set, the review UI, the loop, and its cost controls — and the loop spawns nested `claude -p`
-sessions that can spend real money, so show the person the cost it projects.
+sessions that can spend real money, so show the person the cost it projects. Those sessions are driven
+by the eval set and by the SKILL.md under test, so they run under `--permission-mode dontAsk`, which
+the CLI documents as auto-denying any call the session was not pre-approved for. Widening that —
+to inherit this machine's permission settings, or to any other mode — takes `--allow-host-permissions`
+as well. A mode changes model behaviour, so report which one a score was measured under.
 
 ---
 

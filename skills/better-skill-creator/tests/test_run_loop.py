@@ -867,5 +867,48 @@ class TestVerboseOutput(LoopHarness):
         self.assertIn("nothing here measures the description", err.getvalue())
 
 
+class TestPermissionPolicy(LoopHarness):
+    """The loop launches two kinds of `claude -p`: the probes, and the
+    improvement call. The improvement call is the looser of the two -- it runs
+    in the caller's own working directory with every settings scope loaded --
+    and `--model` already gives it a model of its own, so a posture of its own
+    is the plausible drift. `scripted_probe` binds `*args` and discards them,
+    so the probe leg is not observable here; the optimizer leg is, through the
+    stub's prompt log."""
+
+    def test_the_optimizer_call_carries_the_loops_permission_posture(self):
+        self.control(optimizer_response="<new_description>a second one</new_description>")
+        self.loop(eval_set(2, 2), lambda q, d, i: "no_trigger", max_iterations=2)
+        argv = self.prompts()[0]["argv"]
+        self.assertIn("--permission-mode", argv)
+        self.assertEqual(
+            argv[argv.index("--permission-mode") + 1], run_eval_mod.SAFE_PERMISSION_MODE
+        )
+
+    def test_the_opt_in_reaches_the_optimizer_too(self):
+        """Dropping `allow_host_permissions=` from the improve call alone is
+        the expensive half: `improve_description` then refuses the mode
+        `run_eval` just accepted, the blanket handler records it as
+        `improve_failed`, and the loop stops on an iteration already paid for."""
+        self.control(optimizer_response="<new_description>a second one</new_description>")
+        out = self.loop(
+            eval_set(2, 2), lambda q, d, i: "no_trigger", max_iterations=2,
+            permission_mode=run_eval_mod.INHERIT_PERMISSION_MODE,
+            allow_host_permissions=True,
+        )
+        self.assertNotIn(
+            "improve_failed", out["exit_reason"], out.get("measurement_warnings")
+        )
+        self.assertNotIn("--permission-mode", self.prompts()[0]["argv"])
+
+    def test_the_loop_refuses_an_unopted_mode_before_any_probe(self):
+        with self.assertRaises(run_eval_mod.PermissionModeError):
+            self.loop(
+                eval_set(2, 2), lambda q, d, i: "no_trigger",
+                permission_mode=run_eval_mod.INHERIT_PERMISSION_MODE,
+            )
+        self.assertEqual(self.prompts(), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
