@@ -146,10 +146,37 @@ To check nothing is broken after an edit:
 bash scripts/test-skills.sh
 ```
 
-The live half installs the pack into a scratch `CLAUDE_CONFIG_DIR` rather than
-your own. It proves that redirect took effect before it writes anything, and
-exits 2 without running rather than touching your real `~/.claude` when it
-cannot.
+That's two different checks with one command. The *static* half reads the files
+on disk — every skill has a `SKILL.md`, its name matches its directory, nothing
+is missing from the install list, no body carries the one character sequence
+that makes a skill load as nothing. It needs no Claude and touches nothing, so
+you can run it on its own:
+
+```bash
+bash scripts/test-skills.sh --static
+```
+
+The *live* half actually installs the pack and opens a session per skill, which
+is the only way to catch a skill that resolves but whose body never arrives.
+Static passing tells you the pack is shaped right; only the live half tells you
+a skill loads. CI runs the static half and never the live one.
+
+The live half installs into a scratch `CLAUDE_CONFIG_DIR` rather than your own.
+It proves that redirect took effect before it writes anything, and exits 2
+without running rather than touching your real `~/.claude` when it cannot.
+
+If you're on WSL with Claude installed on the Windows side, the paths have to be
+converted before that CLI can read them, and which conversion depends on what
+your `claude` actually is rather than on your OS. That conversion is done for
+you; whether a full live run then completes on WSL is not something anyone has
+checked yet. To see what it would use, without running anything:
+
+```bash
+bash scripts/test-skills.sh --plan
+```
+
+It prints the plan and stops. It needs `claude` on your `PATH` to have something
+to plan for, and it doesn't install, launch or write anything.
 
 ## Honest bits
 
@@ -157,7 +184,11 @@ Things worth knowing before you rely on this:
 
 - **Only tested on Windows.** The plugin install was run for real on Claude Code
   CLI 2.1.214, Windows 10, and every skill loaded. Nobody has tried macOS or
-  Linux yet, so there may be traps this machine can't see.
+  Linux yet, so there may be traps this machine can't see. One narrow exception,
+  so it isn't mistaken for more than it is: `scripts/test-skills-paths.sh` and
+  `test-skills.sh --plan` were run in a Linux userland (WSL 2.6.3.0,
+  Ubuntu-24.04) on 2026-08-06 and pass there. That exercises the path decision
+  and nothing else — no plugin was installed and no skill was loaded on Linux.
 - **A skill that loads isn't proof of a skill that works.**
   `scripts/test-skills.sh` checks that each skill reaches the session. It can't
   check whether Claude then does anything differently.

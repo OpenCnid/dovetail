@@ -11,15 +11,24 @@
 # platform-shaped difference this exists to surface.
 #
 # Not covered here, and worth knowing:
-#   * `test-skills.sh` runs its static layer only. The live layer installs the
-#     pack into a throwaway CLAUDE_CONFIG_DIR and invokes each skill, which
-#     needs two things: the `claude` CLI on PATH, and a shell that propagates
-#     CLAUDE_CONFIG_DIR to it. A POSIX shell invoking a Windows claude.exe does
-#     not, so the layer now proves the redirect took effect and exits 2 without
-#     running when it cannot. It needs no login and costs no API turn, so it is
-#     addable -- it just is not added yet, and adding it means deciding whether
-#     that exit 2 reads as a skip or a failure. Neither runner is affected:
-#     ubuntu-latest and windows-latest each run a native CLI.
+#   * `test-skills.sh`'s live layer is not run here, and that gap is narrower
+#     than it was. The layer installs the pack into a throwaway
+#     CLAUDE_CONFIG_DIR and invokes each skill, which needs the `claude` CLI on
+#     PATH, paths that CLI can read, and a `marketplace list` that proves the
+#     redirect landed. A POSIX shell invoking a Windows claude.exe supplies the
+#     middle one on its own for neither carrier -- interop drops any variable
+#     not named in WSLENV, and passes arguments unmodified -- so the layer names
+#     the variable, converts the argument, and refuses to write when it cannot
+#     confirm where the write would go.
+#
+#     Two of the script's three modes now run here: `--static` as the inventory
+#     step, and `--plan` many times over inside `test-skills-paths.sh`, which
+#     grades the path decision with no CLI present at all. That decision is the
+#     part that was wrong and silent. What is still not run anywhere is the
+#     layer itself -- installing the pack and starting eight sessions. It needs
+#     no login and costs no API turn, so it remains addable; adding it still
+#     means deciding whether an exit 2 reads as a skip or a failure. Neither
+#     runner is affected: ubuntu-latest and windows-latest each run a native CLI.
 #   * A skill that loads is still not a skill that works. Nothing here measures
 #     whether a loaded skill changes what the model does.
 name: checks
@@ -151,6 +160,26 @@ jobs:
       - name: Supply chain
         shell: bash
         run: bash scripts/check-supply-chain.sh
+
+      # The decision the live layer rests on, graded without running that layer.
+      # It is a third thing rather than a half of one — it runs before both
+      # layers and judges no skill — and it was wrong in one case and silent
+      # about it: a POSIX shell invoking a Windows claude.exe carried
+      # CLAUDE_CONFIG_DIR across through WSLENV and then handed the same CLI the
+      # repository path as an argument, which interop does not translate. This
+      # builds a wrapper farm as the child's entire PATH — a prefix cannot make
+      # cygpath absent, and cygpath shares /usr/bin with sed and mktemp — and
+      # asserts which converter each combination selects, which path each one is
+      # applied to, that a converter answering nothing is refused before a
+      # config exists, that a Windows-shaped CLI path with no converter is *not*
+      # refused, and that no case invoked the CLI. Both legs cover different
+      # ground: the Windows leg takes the cygpath branch for real, and the Linux
+      # leg is where a symlink can shape a CLI path into the form the WSL case
+      # needs, so one case group reports SKIP on Windows and the summary says so
+      # rather than calling it a full pass.
+      - name: Skill-path tests
+        shell: bash
+        run: bash scripts/test-skills-paths.sh
 
       # The release gate takes two inputs from outside itself. One is the tag
       # name, chosen by whoever pushes it: this asserts no workflow interpolates
