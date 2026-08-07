@@ -36,7 +36,8 @@ cd "$ROOT"
 STATIC_ONLY=0
 [ "${1:-}" = "--static" ] && STATIC_ONLY=1
 
-# Keep in step with SKILLS in install.sh and skills in plugin.json.
+# Keep in step with SKILLS in install.sh, and with the directories in skills/ —
+# plugin.json names no skill, so the loader's glob makes the disk the other list.
 SKILLS=(
   "prompt-engineering:skills/prompt-engineering"
   "hypershot-protocol:skills/hypershot-protocol"
@@ -82,8 +83,8 @@ for entry in "${SKILLS[@]}"; do
   note ok "$name"
 done
 
-# every declared path must also appear in both manifests, or one route ships a
-# skill the other does not
+# every declared path must be reachable by both install routes — the plugin
+# loader's glob and install.sh — or one of them ships a skill the other does not
 for entry in "${SKILLS[@]}"; do
   path="${entry#*:}"; name="${entry%%:*}"
   # plugin.json no longer enumerates skills -- it relies on the skills/*/SKILL.md
