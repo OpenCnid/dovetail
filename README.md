@@ -137,6 +137,8 @@ sync step. A plain `git clone` gives you the whole thing.
 [`docs/provenance.md`](docs/provenance.md) records where each skill came from.
 [`RELEASE-NOTES.md`](RELEASE-NOTES.md) has the history, including why the pack
 used to be built out of eight separate repos and why it isn't any more.
+[`docs/release-integrity.md`](docs/release-integrity.md) is what you can check
+about a release you received, and what it does not yet establish.
 
 To check nothing is broken after an edit:
 

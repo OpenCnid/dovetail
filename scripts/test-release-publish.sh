@@ -470,8 +470,14 @@ include = (ruleset.get("conditions") or {}).get("ref_name", {}).get("include", [
 if wanted not in include:
     faults.append(f"does not target {wanted} — this pack's tags are unprotected")
 
+# `non_fast_forward` is in this list because AGENTS.md names all four rules and
+# the check named three, so the file could have lost the fourth and this would
+# still have reported the ruleset as matching the documentation it is checked
+# against. The three cover creating, moving and removing a ref; that one covers
+# moving it backwards, which is how a tag gets repointed at an earlier commit
+# without ever being deleted.
 types = {rule.get("type") for rule in ruleset.get("rules") or []}
-for required in ("creation", "update", "deletion"):
+for required in ("creation", "update", "deletion", "non_fast_forward"):
     if required not in types:
         faults.append(f"no '{required}' rule — that route to a tag is open")
 
@@ -492,7 +498,7 @@ PY
       [ -n "$line" ] && { note FAIL "$RULESET: $line"; fail=1; }
     done <<< "$ruleset_report"
   else
-    note ok "$RULESET restricts creation, update and deletion of ${PACK}--v* and is active"
+    note ok "$RULESET restricts creation, update, deletion and non-fast-forward of ${PACK}--v* and is active"
   fi
 fi
 

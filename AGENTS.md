@@ -429,6 +429,15 @@ pack, because a rename would otherwise leave a ruleset guarding a namespace
 nothing publishes into — indistinguishable from a working one until the release
 that needs it.
 
+What that ruleset does *not* cover is whether anything vouches for the tag once
+it exists. Every tag this pack has published is annotated and none is signed
+(measured 2026-08-06 across `dovetail--v0.2.0` … `dovetail--v0.4.1`), and the
+publish route cannot sign one, because `gh api POST /git/tags` has no signing
+input. `docs/release-integrity.md` carries that layer — the four rules this
+ruleset must keep, why `required_signatures` is deliberately absent until
+signing works, and `scripts/verify-release.sh`, which reports what a received
+tag establishes without claiming what it cannot.
+
 **The identity in that bypass list should be a GitHub App, and not as a
 preference.** `GITHUB_TOKEN` is an App installation token, but whether the
 Actions app can be granted ruleset bypass is documented neither way, so the
