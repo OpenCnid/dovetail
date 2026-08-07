@@ -24,7 +24,9 @@ from pathlib import Path
 from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.run_eval import (
+    SAFE_PERMISSION_MODE,
     add_probe_arguments,
+    check_permission_mode,
     check_probe_arguments,
     check_scaffold,
     check_skill_md_encoding,
@@ -108,10 +110,11 @@ def run_loop(
     max_tools: int = 4,
     setting_sources: str | None = "project,local",
     include_partial_messages: bool = True,
-    permission_mode: str | None = None,
+    permission_mode: str | None = SAFE_PERMISSION_MODE,
     scaffold: str | None = None,
     live_report_path: Path | None = None,
     log_dir: Path | None = None,
+    allow_host_permissions: bool = False,
 ) -> dict:
     """Run the eval + improvement loop."""
     # parse_skill_md raises SkillMdError (a ValueError) rather than handing back
@@ -173,6 +176,7 @@ def run_loop(
             permission_mode=permission_mode,
             scaffold=scaffold,
             verbose=verbose,
+            allow_host_permissions=allow_host_permissions,
         )
         eval_elapsed = time.time() - t0
 
@@ -302,6 +306,8 @@ def run_loop(
                 model=model,
                 log_dir=log_dir,
                 iteration=iteration,
+                permission_mode=permission_mode,
+                allow_host_permissions=allow_host_permissions,
             )
         except Exception as exc:  # noqa: BLE001
             # Every completed iteration is paid for. Do not throw them away
@@ -454,6 +460,13 @@ def main():
     args = parser.parse_args()
 
     check_probe_arguments(args.num_workers, args.runs_per_query)
+    # Governs the improvement call as well as the probes. `--model` names a
+    # different model for it, and it is a second `claude -p` on this machine
+    # carrying the same SKILL.md body, so it takes the same posture rather than
+    # a posture of its own.
+    permission_mode = check_permission_mode(
+        args.permission_mode, args.allow_host_permissions
+    )
 
     eval_set = load_eval_set(Path(args.eval_set))
     skill_path = Path(args.skill_path)
@@ -479,6 +492,7 @@ def main():
         confirm_threshold=args.confirm_threshold,
         assume_yes=args.yes,
         label="optimization loop",
+        permission_mode=permission_mode,
     )
 
     if args.report != "none":
@@ -526,10 +540,11 @@ def main():
             max_tools=args.max_tools,
             setting_sources=args.setting_sources or None,
             include_partial_messages=not args.no_partial_messages,
-            permission_mode=args.permission_mode,
+            permission_mode=permission_mode,
             scaffold=args.scaffold,
             live_report_path=live_report_path,
             log_dir=log_dir,
+            allow_host_permissions=args.allow_host_permissions,
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)

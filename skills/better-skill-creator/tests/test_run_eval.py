@@ -43,10 +43,17 @@ if str(SKILL_ROOT) not in sys.path:
 from scripts import run_eval as run_eval_mod  # noqa: E402
 from scripts.generate_report import generate_html  # noqa: E402
 from scripts.run_eval import (  # noqa: E402
+    INHERIT_PERMISSION_MODE,
     OUTSTANDING_JOB_BUFFER,
+    PERMISSION_MODE_RISK,
+    PERMISSION_MODES,
+    SAFE_PERMISSION_MODE,
+    SAFE_PERMISSION_MODES,
     EvalSetError,
+    PermissionModeError,
     ProbeArgumentError,
     ScaffoldError,
+    check_permission_mode,
     check_probe_arguments,
     check_scaffold,
     check_skill_md_encoding,
@@ -55,6 +62,7 @@ from scripts.run_eval import (  # noqa: E402
     run_eval,
     run_single_query,
     validate_eval_set,
+    validate_permission_mode,
     validate_probe_arguments,
     validate_scaffold,
 )
@@ -322,21 +330,25 @@ class TestIsolation(StubHarness):
 class TestProbeFlagsReachTheChild(StubHarness):
     """V7 flagged `--permission-mode` and `--no-partial-messages` as pure
     passthrough with nothing exercising them. They are kept rather than cut --
-    `--permission-mode` is the C8 blast-radius knob the spend projection points
-    the reader at, and disabling partial messages is the escape hatch for a CLI
-    whose partial stream is malformed -- so they get a test instead."""
+    `--permission-mode` decides what a probe may do to this machine, and
+    disabling partial messages is the escape hatch for a CLI whose partial
+    stream is malformed -- so they get a test instead.
+
+    `--permission-mode` is no longer passthrough. It defaults to
+    SAFE_PERMISSION_MODE, and the assertion that used to live here --
+    `test_permission_mode_is_absent_when_unset` -- pinned the opposite contract:
+    a caller who said nothing got a session with this machine's permissions.
+    Its replacements are in TestPermissionPolicy below."""
 
     def test_permission_mode_is_forwarded_to_claude(self):
+        # `manual` rather than `plan`: an explicitly chosen mode still reaches
+        # the child, and this one needs no opt-in to choose. `plan` does need
+        # one -- see TestPermissionPolicy.test_plan_is_not_treated_as_safe.
         self.control(stream=str(TRIGGER_STREAM), rename=True)
-        self.probe(permission_mode="plan")
+        self.probe(permission_mode="manual")
         argv = self.stub_report()["argv"]
         self.assertIn("--permission-mode", argv)
-        self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
-
-    def test_permission_mode_is_absent_when_unset(self):
-        self.control(stream=str(TRIGGER_STREAM), rename=True)
-        self.probe()
-        self.assertNotIn("--permission-mode", self.stub_report()["argv"])
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "manual")
 
     def test_partial_messages_are_requested_by_default(self):
         self.control(stream=str(TRIGGER_STREAM), rename=True)
@@ -359,6 +371,238 @@ class TestProbeFlagsReachTheChild(StubHarness):
         self.control(stream=str(TRIGGER_STREAM), rename=True)
         self.probe()
         self.assertIn("--no-session-persistence", self.stub_report()["argv"])
+
+
+class TestPermissionPolicy(StubHarness):
+    """A probe is a full Claude Code session on this machine, driven by an eval
+    set's queries and by the SKILL.md under test -- both of which arrived from
+    wherever the skill did. `--permission-mode` used to default to unset, which
+    is the CLI's "take this machine's permission settings", and the flag's own
+    help said so. Third-party text therefore ran with the host's capabilities
+    unless somebody had thought to pass a flag.
+
+    Every assertion below reads the argv the child was launched with. Nothing
+    here runs a model, and nothing here proves what the CLI *does* with a mode
+    -- that is documented behaviour, recorded at SAFE_PERMISSION_MODE. What is
+    proved is which bytes reach the command line, which is the half this
+    repository owns."""
+
+    def test_a_probe_that_was_told_nothing_is_bounded(self):
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        self.probe()
+        argv = self.stub_report()["argv"]
+        self.assertIn("--permission-mode", argv)
+        self.assertEqual(
+            argv[argv.index("--permission-mode") + 1], SAFE_PERMISSION_MODE
+        )
+
+    def test_none_means_no_opinion_and_lands_on_the_safe_mode(self):
+        """The regression this whole change is about. `None` used to omit the
+        flag, so a caller that had never considered permissions got the host's
+        -- "I did not think about this" and "give it everything" were the same
+        argument."""
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        self.probe(permission_mode=None)
+        argv = self.stub_report()["argv"]
+        self.assertEqual(
+            argv[argv.index("--permission-mode") + 1], SAFE_PERMISSION_MODE
+        )
+
+    def test_inheriting_host_permissions_needs_the_opt_in(self):
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        record = self.probe(permission_mode=INHERIT_PERMISSION_MODE)
+        self.assertEqual(record["status"], "error", record)
+        self.assertIn("--allow-host-permissions", record["error"])
+
+    def test_the_opt_in_is_what_omits_the_flag(self):
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        self.probe(
+            permission_mode=INHERIT_PERMISSION_MODE, allow_host_permissions=True
+        )
+        self.assertNotIn("--permission-mode", self.stub_report()["argv"])
+
+    def test_plan_is_not_treated_as_safe(self):
+        """`plan` reads as the cautious choice and is not one: the published
+        mode table gives `default` as "Reads only" and `plan` as "Reads, plus
+        classifier-approved commands when auto mode is available". The old help
+        text recommended it."""
+        self.assertNotIn("plan", SAFE_PERMISSION_MODES)
+        with self.assertRaises(PermissionModeError):
+            validate_permission_mode("plan")
+        self.assertEqual(
+            validate_permission_mode("plan", allow_host_permissions=True), "plan"
+        )
+
+    def test_every_unsafe_mode_is_gated_and_every_gate_has_a_reason(self):
+        for mode in PERMISSION_MODES:
+            with self.subTest(mode=mode):
+                if mode in SAFE_PERMISSION_MODES:
+                    self.assertEqual(validate_permission_mode(mode), mode)
+                    continue
+                with self.assertRaises(PermissionModeError) as ctx:
+                    validate_permission_mode(mode)
+                # The refusal quotes the row rather than saying "unsafe": the
+                # user picked the mode on purpose and is owed the reason.
+                # Whitespace-flattened, because the message is wrapped to the
+                # terminal and the risk string is one sentence inside it.
+                flat = " ".join(str(ctx.exception).split())
+                self.assertIn(" ".join(PERMISSION_MODE_RISK[mode].split()), flat)
+                self.assertIn("--allow-host-permissions", str(ctx.exception))
+                self.assertEqual(
+                    validate_permission_mode(mode, allow_host_permissions=True), mode
+                )
+
+    def test_an_unknown_mode_is_refused_rather_than_forwarded(self):
+        with self.assertRaises(PermissionModeError) as ctx:
+            validate_permission_mode("readOnly", allow_host_permissions=True)
+        self.assertIn("readOnly", str(ctx.exception))
+
+    def test_the_driver_refuses_before_it_buys_a_session(self):
+        """run_eval validates for itself, so a library caller that never goes
+        through main() gets the same refusal -- and gets it before the pool
+        exists rather than as one errored probe among many."""
+        launched = []
+
+        def fake(query, *args, **kwargs):
+            launched.append(query)
+            raise AssertionError("a probe was launched under a refused mode")
+
+        with mock.patch.object(run_eval_mod, "run_single_query", fake):
+            with self.assertRaises(PermissionModeError):
+                run_eval(
+                    eval_set=[{"query": "a", "should_trigger": True}],
+                    skill_name="widget-forge", description=DESCRIPTION,
+                    num_workers=1, timeout=5,
+                    permission_mode=INHERIT_PERMISSION_MODE,
+                )
+        self.assertEqual(launched, [])
+
+    def test_the_cli_gate_exits_one_and_names_the_way_out(self):
+        with self.assertRaises(SystemExit) as ctx:
+            check_permission_mode(INHERIT_PERMISSION_MODE, False)
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_the_cli_gate_says_out_loud_when_the_opt_in_was_used(self):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            mode = check_permission_mode(INHERIT_PERMISSION_MODE, True)
+        self.assertEqual(mode, INHERIT_PERMISSION_MODE)
+        self.assertIn("--allow-host-permissions", err.getvalue())
+
+    def test_the_gate_runs_before_the_spend_gate_in_every_entry_point(self):
+        """Refusing a mode after the projection means the user has been shown a
+        bill and asked to approve it before anything checks what the sessions
+        they are buying may do."""
+        import ast
+
+        for module in ("run_eval.py", "run_loop.py", "improve_description.py"):
+            tree = ast.parse((SKILL_ROOT / "scripts" / module).read_text(encoding="utf-8"))
+            main_fn = next(
+                n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
+            )
+            # Sorted by line, not by `ast.walk` order. `walk` is breadth-first,
+            # so a `project_spend` nested one level inside an `if` or a `try`
+            # sorts after an unnested call that really runs second -- and the
+            # assertion passes while the gate is in the wrong place.
+            names = [
+                n.func.id
+                for n in sorted(
+                    (
+                        n for n in ast.walk(main_fn)
+                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    ),
+                    key=lambda n: (n.lineno, n.col_offset),
+                )
+            ]
+            self.assertIn("check_permission_mode", names, module)
+            if "project_spend" in names:
+                self.assertLess(
+                    names.index("check_permission_mode"),
+                    names.index("project_spend"),
+                    f"{module}: the permission gate runs after the spend gate",
+                )
+
+    def test_the_opt_in_survives_the_trip_through_the_pool(self):
+        """`run_eval` hands `run_single_query` eleven *positional* arguments
+        through `executor.submit`, and this is the last of them. `run_eval`
+        validates once for itself before the pool, so a forward that stops
+        landing does not stop the run -- it starts, and then every probe
+        re-validates without the opt-in and is recorded as `error`, which is
+        also what a rate limit looks like. Asserted on the driver, because the
+        worker is already pinned above and the tuple is not."""
+        self.control(stream=str(TRIGGER_STREAM), rename=True)
+        out = run_eval(
+            eval_set=[{"query": "i need a widget.toml manifest",
+                       "should_trigger": True}],
+            skill_name="widget-forge", description=DESCRIPTION,
+            num_workers=1, timeout=60,
+            permission_mode=INHERIT_PERMISSION_MODE,
+            allow_host_permissions=True,
+        )
+        self.assertEqual(out["results"][0]["errored"], 0, out["results"])
+        self.assertNotIn("--permission-mode", self.stub_report()["argv"])
+
+    def test_the_projection_names_the_mode_it_is_pricing(self):
+        """The banner is the one screen somebody reads before agreeing to
+        spend, and `references/description-optimization.md` sends the reader
+        here for the mode a number was measured under. The `inherit` branch is
+        the load-bearing one: it is the only place the opt-in has a visible
+        consequence at the moment money is approved."""
+        def banner(mode):
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                project_spend(
+                    n_queries=2, runs_per_query=1, iterations=1, model="haiku",
+                    cost_per_probe=0.01, max_cost=10.0, confirm_threshold=1000.0,
+                    assume_yes=True, permission_mode=mode,
+                )
+            return err.getvalue()
+
+        safe = banner(SAFE_PERMISSION_MODE)
+        self.assertIn(f"--permission-mode {SAFE_PERMISSION_MODE}", safe)
+        self.assertIn("auto-denies", safe)
+        self.assertIn("same mode", safe)
+        # The text this replaced recommended `plan` here, which is looser than
+        # the unset default it was offered as a bound on.
+        self.assertNotIn("plan", safe)
+
+        inherited = banner(INHERIT_PERMISSION_MODE)
+        self.assertIn("no --permission-mode", inherited)
+        self.assertNotIn("auto-denies", inherited)
+
+        # `manual` prompts rather than auto-denying, and a headless probe has
+        # nobody to answer -- so it must not borrow the default's sentence.
+        prompting = banner("manual")
+        self.assertIn("--permission-mode manual", prompting)
+        self.assertNotIn("auto-denies", prompting)
+        self.assertIn("error", prompting)
+
+        for mode, risk in PERMISSION_MODE_RISK.items():
+            if mode == INHERIT_PERMISSION_MODE:
+                continue
+            with self.subTest(mode=mode):
+                named = banner(mode)
+                self.assertIn(f"--permission-mode {mode}", named)
+
+        # A caller that skipped check_permission_mode used to reach a KeyError
+        # here, turning the spend gate into a traceback.
+        self.assertIn(f"--permission-mode {SAFE_PERMISSION_MODE}", banner(None))
+
+    def test_a_truthy_non_bool_does_not_open_the_gate(self):
+        """A wrapper reading the opt-in out of an environment variable or a
+        config file hands over the *string* "false", which is truthy. The gate
+        fails closed on anything that is not the boolean itself; argparse's
+        store_true gives a real bool, so no CLI path is affected."""
+        for value in ("false", "0", "no", 1, [0], {"a": 1}):
+            with self.subTest(value=value):
+                with self.assertRaises(PermissionModeError):
+                    validate_permission_mode(
+                        "bypassPermissions", allow_host_permissions=value
+                    )
+        self.assertEqual(
+            validate_permission_mode("bypassPermissions", allow_host_permissions=True),
+            "bypassPermissions",
+        )
 
 
 class TestCommandFileEncoding(StubHarness):
@@ -1366,6 +1610,25 @@ class TestCliRefusesNonInteractively(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertNotIn("Traceback", proc.stderr)
         self.assertIn('wrapped under the key "queries"', proc.stderr)
+
+    def test_inheriting_host_permissions_refuses_before_the_projection(self):
+        """This class sets no BETTER_SKILL_CREATOR_CLAUDE_ARGV, so anything that
+        gets past the gates launches the real CLI. Exit 1 with no projection
+        printed is what proves nothing was reached."""
+        evals = self._evals([{"query": "a", "should_trigger": True}])
+        proc = self._run("--eval-set", evals, "--skill-path", str(FIXTURES / "probe-skill"),
+                         "--yes", "--permission-mode", INHERIT_PERMISSION_MODE)
+        self.assertEqual(proc.returncode, 1, proc.stderr[-2000:])
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("--allow-host-permissions", proc.stderr)
+        self.assertNotIn("Projected spend", proc.stderr)
+
+    def test_an_unknown_permission_mode_is_a_usage_error(self):
+        evals = self._evals([{"query": "a", "should_trigger": True}])
+        proc = self._run("--eval-set", evals, "--skill-path", str(FIXTURES / "probe-skill"),
+                         "--yes", "--permission-mode", "readOnly")
+        self.assertEqual(proc.returncode, 2, proc.stderr[-2000:])
+        self.assertNotIn("Traceback", proc.stderr)
 
 
 class TestSplitGuard(unittest.TestCase):
