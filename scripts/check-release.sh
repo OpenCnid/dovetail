@@ -332,7 +332,18 @@ fi
 # the files the checks read: `git archive` of the whole tree exceeds MAX_PATH on
 # Windows -- `skills/better-skill-creator/tests/fixtures/` is the offender, and
 # `checks` runs this on `windows-latest` -- and nothing else here is opened.
-SNAPSHOT="$(mktemp -d)"
+#
+# `mktemp -d` failing is exit 2, not the 1 `set -euo pipefail` would hand back.
+# This script reserves 1 for "a check failed" and 2 for "no verdict", and an
+# unwritable TMPDIR is the second: nothing was graded, so reporting that the
+# release failed a check names a problem with the release that is not there.
+# Said with the commit rather than with `$TAG`, which HEAD mode has not built
+# yet -- it reads the version out of the snapshot this failed to make.
+if ! SNAPSHOT="$(mktemp -d)"; then
+  echo "cannot create a temporary directory — set TMPDIR to somewhere writable" >&2
+  echo "no snapshot of $(git rev-parse --short "$SHA"), so no check ran and there is no verdict" >&2
+  exit 2
+fi
 trap 'rm -rf "$SNAPSHOT"' EXIT
 
 # A path this tree could carry: relative, normalised, and inside itself. Three
@@ -374,7 +385,17 @@ snapshot_path_ok() {
 # apart: "this commit does not carry that manifest" is a disagreement about
 # manifests, and "that is not a path in this tree" is not a manifest question at
 # all.
+#
+# `_AS` carries what the refusal was, because not every one is about leaving the
+# tree: `scripts/bump-version.sh` is relative, normalised and inside it, and is
+# still the one path here that must never be written. It reads as a predicate so
+# the report can print it verbatim, and the path is appended only when there is
+# one -- a list that cannot be read is not a list naming a bad path.
 SNAPSHOT_REFUSED=""
+SNAPSHOT_REFUSED_AS=""
+
+# Copied from the checkout, executed by check 1, and never taken from the commit.
+TOOL="scripts/bump-version.sh"
 
 # Non-zero when the commit does not carry the path at all. Each caller reports
 # that as its own check failing rather than aborting the run: "this commit has
@@ -392,13 +413,52 @@ SNAPSHOT_REFUSED=""
 #
 # Refused rather than clamped or resolved. A commit whose `.version-bump.json`
 # points outside its own tree is not a commit to repair on the fly.
+#
+# Two more refusals sit beside the containment one, because leaving the tree is
+# not the only way a listed path reaches something it should not. See each.
 snapshot() {
   if ! snapshot_path_ok "$1"; then
     SNAPSHOT_REFUSED="$1"
+    SNAPSHOT_REFUSED_AS="names a path outside the tree"
     return 1
   fi
-  mkdir -p "$SNAPSHOT/$(dirname "$1")"
-  git show "$SHA:$1" > "$SNAPSHOT/$1" 2>/dev/null
+
+  # Inside the tree, normalised, relative -- and still not this gate's to write.
+  # `$SNAPSHOT/scripts/bump-version.sh` is the tool check 1 executes, and it was
+  # copied in *before* the commit's own paths were materialised over it, so a
+  # list naming it replaced the tool with the commit's blob and the next line ran
+  # it. Measured 2026-08-06: a commit whose manifests genuinely disagree
+  # (plugin.json 1.0.0, marketplace.json metadata.version 9.9.9) carried a
+  # two-line `bump-version.sh` that touched a file and exited 0; the gate printed
+  # `ok manifests agree with each other` and exited 0, with the touch performed.
+  # That is arbitrary code out of the commit under test, which is the promise the
+  # block above check 1 says this declines to make. Neither `snapshot_path_ok`
+  # nor the floor below can answer it: the path is relative, normalised and
+  # inside the tree, and a list naming it may still name every required field.
+  if [ "$1" = "$TOOL" ]; then
+    SNAPSHOT_REFUSED="$1"
+    SNAPSHOT_REFUSED_AS="names the tool that reads it"
+    return 1
+  fi
+
+  # `git show <rev>:<tree>` exits 0 and prints the tree's entry names, so a
+  # commit carrying `RELEASE-NOTES.md/` as a *directory* snapshotted to a file
+  # whose contents were that listing -- and a single entry named
+  # `## v1.0.0 (2026-08-06)` satisfied check 4's grep. Measured 2026-08-06: every
+  # check `ok` and exit 0 on a commit with no release notes at all. Ask what the
+  # object is before asking for its bytes. `git cat-file -t` also refuses the
+  # specs `git show` reinterprets -- given `<sha>:sub/../witness.txt` it fell
+  # through to its own revision DWIM and printed HEAD at exit 0, where this exits
+  # 128.
+  [ "$(git cat-file -t "$SHA:$1" 2>/dev/null)" = blob ] || return 1
+
+  # `--` because a path is not an option list. `dirname -odd/extra.json` exits 1
+  # with `unknown option -- o`, which left the parent directory unmade and the
+  # redirection with nowhere to write, and the gate called that a manifest
+  # disagreement on a commit that carries the file. A leading `-` is legal in a
+  # git tree and `snapshot_path_ok` rightly allows it.
+  mkdir -p "$SNAPSHOT/$(dirname -- "$1")" &&
+    git show "$SHA:$1" > "$SNAPSHOT/$1" 2>/dev/null
 }
 
 # The one snapshot failure that is not a check failing. Everything below reads a
@@ -472,10 +532,34 @@ echo
 # answer than the disagreement it used to be reported as, and the same safe
 # direction.
 snapshot_manifests() {
-  local path
+  local paths path
   snapshot .version-bump.json || return 1
-  mkdir -p "$SNAPSHOT/scripts"
-  cp scripts/bump-version.sh "$SNAPSHOT/scripts/bump-version.sh" || return 1
+
+  # Read into a variable rather than through a process substitution. `while ...
+  # done < <(cmd)` never observes `cmd`'s status, so an enumerator that died fed
+  # the loop zero lines and `snapshot_manifests` returned *success* having
+  # materialised nothing -- and its stderr went to /dev/null, so nothing said so.
+  #
+  # The floor below does not cover this. It parses the list itself, inside a
+  # `try`, so it survives what kills the enumerator: an entry of
+  # `{"path": 123, "field": "version"}` formats into the floor's set perfectly
+  # well while `sorted()` here raises `TypeError` on int against str. With the
+  # three required fields also listed the floor is satisfied, the loop reads
+  # nothing, and check 1 goes on to run the tool over an empty snapshot.
+  #
+  # Which it did: stub the tool to exit 0 -- something a gate is entitled to
+  # assume a tool may do -- and the run printed `ok manifests agree with each
+  # other` and exited 0 on a list that cannot be read.
+  if ! paths="$("$PY" -c 'import json,sys;print("\n".join(sorted({e["path"] for e in json.load(open(sys.argv[1]))["files"]})))' \
+      "$SNAPSHOT/.version-bump.json" 2>/dev/null)"; then
+    SNAPSHOT_REFUSED_AS="is not a readable list of paths"
+    return 1
+  fi
+  if [ -z "$paths" ]; then
+    SNAPSHOT_REFUSED_AS="names no files at all"
+    return 1
+  fi
+
   while IFS= read -r path; do
     # Python's default text mode writes CRLF on Windows -- the same translation
     # bump-version.sh disables with `newline="\n"` when it writes a manifest.
@@ -485,8 +569,12 @@ snapshot_manifests() {
     # manifests that disagree. Measured 2026-08-06 on git-bash 5.2.37(msys),
     # where both `python3` (3.12.10) and `python` (3.13.1) translate.
     snapshot "${path%$'\r'}" || return 1
-  done < <("$PY" -c 'import json,sys;print("\n".join(sorted({e["path"] for e in json.load(open(sys.argv[1]))["files"]})))' \
-    "$SNAPSHOT/.version-bump.json" 2>/dev/null)
+  done <<< "$paths"
+
+  # Last, so that the tool is the checkout's whatever the list said. Its path is
+  # refused in `snapshot` as well; this is the half that does not depend on
+  # having thought of every way to spell one path.
+  mkdir -p "$SNAPSHOT/scripts" && cp "$TOOL" "$SNAPSHOT/$TOOL"
 }
 
 # Reading the list from the commit hands the commit its own syllabus, though.
@@ -540,8 +628,11 @@ if ! snapshot_manifests; then
   # the path is fine, and passes. Nothing about the manifests was read here: the
   # run stopped at the list itself. Say which path, because that is the whole of
   # the repair.
-  if [ -n "$SNAPSHOT_REFUSED" ]; then
-    note FAIL ".version-bump.json names a path outside the tree: $SNAPSHOT_REFUSED"
+  #
+  # Where the refusal is not about a path at all -- the tool, or a list that
+  # cannot be read -- it says only what it was, because there is no path to name.
+  if [ -n "$SNAPSHOT_REFUSED_AS" ]; then
+    note FAIL ".version-bump.json ${SNAPSHOT_REFUSED_AS}${SNAPSHOT_REFUSED:+: $SNAPSHOT_REFUSED}"
   else
     # Named with the commit, because the copy on disk is a different file and
     # `--check` on it may well pass while this one fails -- that gap is the bug
@@ -557,7 +648,7 @@ else
     # `bump-version.sh --check` would find it passing.
     note FAIL ".version-bump.json at $(git rev-parse --short "$SHA") does not list ${UNCOVERED//$'\n'/, } — check 1 grades only what that file names"
     fail=1
-  elif bash "$SNAPSHOT/scripts/bump-version.sh" --check >/dev/null 2>&1; then
+  elif bash "$SNAPSHOT/$TOOL" --check >/dev/null 2>&1; then
     note ok "manifests agree with each other"
   else
     note FAIL "manifests disagree at $(git rev-parse --short "$SHA") — run: bash scripts/bump-version.sh --check"

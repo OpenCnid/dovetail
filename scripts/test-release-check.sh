@@ -1131,6 +1131,273 @@ else
   note ok ".claude-plugin/plugin.json — an ordinary path still snapshots and grades"
 fi
 
+# ------------------ what a listed path reaches without ever leaving the tree
+# The guard above asks whether this tree could carry a path, and every shape it
+# refuses is one that leaves. That is not the whole of what the list reaches.
+# `scripts/bump-version.sh` is relative, normalised and inside the tree, it is on
+# no floor so naming it narrows nothing, and it is the file check 1 *executes*.
+# The tool went into the snapshot before the commit's own paths were materialised
+# over it, so a list naming it replaced the tool with the commit's blob and the
+# next line ran it. Measured 2026-08-06 on git-bash 5.2.37(msys) against the gate
+# carrying both the escape guard and the floor: `ok manifests agree with each
+# other`, `Release check passed.`, exit 0, payload executed.
+#
+# Three more that neither the guard nor the floor can see, because none of them
+# is about where a path points or which fields a list covers:
+#
+#   a tree, not a blob   `git show <rev>:<tree>` exits 0 and prints entry names,
+#                        so a `RELEASE-NOTES.md/` directory whose one entry is
+#                        named `## v<version> (2026-08-06)` satisfied check 4.
+#   a leading `-`        `dirname` without `--` reads `-odd/extra.json` as
+#                        `unknown option -- o`, so the parent is never made and
+#                        the gate calls a commit that carries the file a
+#                        disagreement. The refusing direction, on a legal path.
+#   a list it cannot read  the enumerator ran in a process substitution, whose
+#                        status a `while` loop never sees. The floor does not
+#                        cover it: the floor parses the list itself inside a
+#                        `try`, so `{"path": 123, "field": "version"}` formats
+#                        into its set while `sorted()` raises `TypeError` in the
+#                        enumerator -- list the three required fields beside it
+#                        and the floor is satisfied, the loop reads nothing, and
+#                        check 1 runs the tool over an empty snapshot.
+#
+# Own fixtures, for the reason the section above gives: these need trees wrong in
+# specific ways -- a directory where a file belongs, a `-odd/` directory, a
+# stubbed tool -- and leaving those in a shared fixture would leave them there
+# for everything added after.
+echo
+echo "behaviour — what a listed path reaches without ever leaving the tree"
+
+INSIDE_VERSION="$("$PYJSON" -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+
+# `marketplace.json` for check 3 and the floor both, the way the escape fixture
+# carries it: without it every leg here fails a check it is not about.
+inside_repo() {   # inside_repo <dir>
+  local dir="$1"
+  mkdir -p "$dir/.claude-plugin" "$dir/scripts"
+  cp .claude-plugin/plugin.json .claude-plugin/marketplace.json "$dir/.claude-plugin/"
+  cp RELEASE-NOTES.md "$dir/"
+  cp scripts/check-release.sh scripts/bump-version.sh "$dir/scripts/"
+  git -C "$dir" -c init.defaultBranch=main init -q
+  git -C "$dir" symbolic-ref HEAD refs/heads/main
+  git -C "$dir" config core.autocrlf false
+}
+
+# The floor, plus whatever the caller is testing. Same reasoning as
+# `escape_commit`: a list naming one path alone is refused for narrowing, which
+# is not what any leg below is about.
+inside_list() {   # inside_list <dir> [extra path]
+  "$PYJSON" - "$1/.version-bump.json" "${2-}" <<'PY'
+import json, sys
+path, listed = sys.argv[1], sys.argv[2]
+files = [
+    {"path": ".claude-plugin/plugin.json", "field": "version"},
+    {"path": ".claude-plugin/marketplace.json", "field": "plugins.0.version"},
+    {"path": ".claude-plugin/marketplace.json", "field": "metadata.version"},
+]
+if listed and listed not in {entry["path"] for entry in files}:
+    files.append({"path": listed, "field": "version"})
+with open(path, "w", newline="\n") as f:
+    json.dump({"files": files}, f, indent=2)
+    f.write("\n")
+PY
+}
+
+inside_seal() { git -C "$1" add -A && git -C "$1" -c user.name=t -c user.email=t@e commit -q -m "the list under test"; }
+inside_run()  { PATH="$TMP/bin:$PATH" bash "$1/scripts/check-release.sh" --head 2>&1; }
+
+# ---- the list names the tool the gate runs
+TOOL_DIR="$TMP/inside-tool"
+TOOL_CANARY="$TMP/canary-tool"
+inside_repo "$TOOL_DIR"
+inside_list "$TOOL_DIR" "scripts/bump-version.sh"
+cat > "$TOOL_DIR/scripts/bump-version.sh" <<SH
+#!/usr/bin/env bash
+touch "$TOOL_CANARY"
+exit 0
+SH
+
+# The canary, fired the way the gate fired it: this is a bash script the gate
+# executes, so running it is the whole reproduction. An `exit 0` payload is also
+# what makes `ok manifests agree with each other` reachable with nothing read.
+rm -f "$TOOL_CANARY"
+bash "$TOOL_DIR/scripts/bump-version.sh" --check >/dev/null 2>&1 || true
+if [ -e "$TOOL_CANARY" ]; then
+  note ok "canary fires when the commit's bump-version.sh is run"
+  rm -f "$TOOL_CANARY"
+else
+  note FAIL "canary cannot fire — the assertions below would pass vacuously"
+  fail=1
+fi
+
+inside_seal "$TOOL_DIR"
+# The gate copies its tool from the checkout it runs out of, which here is the
+# fixture. Put the honest one back, or the payload runs from there and this says
+# nothing about where the snapshot's copy came from.
+cp scripts/bump-version.sh "$TOOL_DIR/scripts/bump-version.sh"
+
+out="$(inside_run "$TOOL_DIR")" && rc=0 || rc=$?
+if [ -e "$TOOL_CANARY" ]; then
+  note FAIL "scripts/bump-version.sh — the commit's script RAN"
+  rm -f "$TOOL_CANARY"
+  fail=1
+elif printf '%s\n' "$out" | grep -qE '^ +ok +manifests agree'; then
+  note FAIL "scripts/bump-version.sh — nothing was read and the manifests were called agreed"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "scripts/bump-version.sh — exit $rc, expected 1 (the path is refused)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "names the tool that reads it: scripts/bump-version.sh"; then
+  note FAIL "scripts/bump-version.sh — refused, but not as the tool the gate runs"
+  fail=1
+else
+  note ok "scripts/bump-version.sh — refused, and the commit's script did not run"
+fi
+
+# ---- the object is a tree, and check 4 was reading its entry names
+NOTES_DIR="$TMP/inside-notes-tree"
+inside_repo "$NOTES_DIR"
+inside_list "$NOTES_DIR"
+rm "$NOTES_DIR/RELEASE-NOTES.md"
+mkdir -p "$NOTES_DIR/RELEASE-NOTES.md"
+: > "$NOTES_DIR/RELEASE-NOTES.md/## v$INSIDE_VERSION (2026-08-06)"
+inside_seal "$NOTES_DIR"
+
+out="$(inside_run "$NOTES_DIR")" && rc=0 || rc=$?
+if printf '%s\n' "$out" | grep -qF "RELEASE-NOTES.md has a v$INSIDE_VERSION entry"; then
+  note FAIL "RELEASE-NOTES.md/ — a directory listing satisfied check 4"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "RELEASE-NOTES.md/ — exit $rc, expected 1 (there are no release notes)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "RELEASE-NOTES.md has no '## v$INSIDE_VERSION' entry"; then
+  note FAIL "RELEASE-NOTES.md/ — failed, but not because the notes entry is missing"
+  fail=1
+else
+  note ok "RELEASE-NOTES.md/ — a tree is not a file, and its entry names are not an entry"
+fi
+
+# ---- a legal path the gate used to misread, which must now grade
+DASH_DIR="$TMP/inside-dash"
+inside_repo "$DASH_DIR"
+inside_list "$DASH_DIR" "-odd/extra.json"
+mkdir -p "$DASH_DIR/-odd"
+"$PYJSON" - "$DASH_DIR/-odd/extra.json" "$INSIDE_VERSION" <<'PY'
+import json, sys
+with open(sys.argv[1], "w", newline="\n") as f:
+    json.dump({"version": sys.argv[2]}, f, indent=2)
+    f.write("\n")
+PY
+inside_seal "$DASH_DIR"
+
+out="$(inside_run "$DASH_DIR")" && rc=0 || rc=$?
+if ! printf '%s\n' "$out" | grep -qF "manifests agree with each other"; then
+  note FAIL "-odd/extra.json — the commit carries it and the gate did not read it"
+  fail=1
+elif [ "$rc" -ne 0 ]; then
+  note FAIL "-odd/extra.json — exit $rc, expected 0 (it is in the tree and carries $INSIDE_VERSION)"
+  fail=1
+else
+  note ok "-odd/extra.json — a leading '-' is a path, not an option list"
+fi
+
+# ---- a list the enumerator cannot read, over a floor it satisfies
+# Asserting on the gate's verdict alone cannot separate these, and the floor is
+# the second reason why. `bump-version.sh` re-reads the same list and fails on it
+# independently, and a list malformed enough to kill the enumerator usually fails
+# the floor first -- either way the run exits 1 and only the wording moves. So
+# the list here covers all three required fields and still kills the enumerator
+# (`{"path": 123, ...}` formats into the floor's set, and `sorted()` raises on
+# int against str), and the tool is stubbed to exit 0 -- behaviour a gate is
+# entitled to assume a tool may have -- in the fixture's *checkout*, where the
+# gate copies its tool from, so the trusted half is what is replaced rather than
+# anything smuggled out of the commit.
+ENUM_DIR="$TMP/inside-enumerator"
+ENUM_CANARY="$TMP/canary-enumerator"
+inside_repo "$ENUM_DIR"
+"$PYJSON" - "$ENUM_DIR/.version-bump.json" <<'PY'
+import json, sys
+files = [
+    {"path": ".claude-plugin/plugin.json", "field": "version"},
+    {"path": ".claude-plugin/marketplace.json", "field": "plugins.0.version"},
+    {"path": ".claude-plugin/marketplace.json", "field": "metadata.version"},
+    # Formats into the floor's `f"{path} {field}"` set; unsortable beside the
+    # strings the enumerator collects.
+    {"path": 123, "field": "version"},
+]
+with open(sys.argv[1], "w", newline="\n") as f:
+    json.dump({"files": files}, f, indent=2)
+    f.write("\n")
+PY
+inside_seal "$ENUM_DIR"
+
+cat > "$ENUM_DIR/scripts/bump-version.sh" <<SH
+#!/usr/bin/env bash
+touch "$ENUM_CANARY"
+exit 0
+SH
+rm -f "$ENUM_CANARY"
+bash "$ENUM_DIR/scripts/bump-version.sh" --check >/dev/null 2>&1 || true
+if [ ! -e "$ENUM_CANARY" ]; then
+  note FAIL "the stub tool cannot fire — the assertions below would pass vacuously"
+  fail=1
+fi
+rm -f "$ENUM_CANARY"
+
+out="$(inside_run "$ENUM_DIR")" && rc=0 || rc=$?
+if [ -e "$ENUM_CANARY" ]; then
+  note FAIL "an unreadable list — the tool ran on a snapshot that materialised nothing"
+  rm -f "$ENUM_CANARY"
+  fail=1
+elif printf '%s\n' "$out" | grep -qE '^ +ok +manifests agree'; then
+  note FAIL "an unreadable list — snapshotted nothing and called it agreement"
+  fail=1
+elif printf '%s\n' "$out" | grep -qF "does not list"; then
+  note FAIL "an unreadable list — caught by the floor, so the enumerator's status is untested"
+  fail=1
+elif [ "$rc" -ne 1 ]; then
+  note FAIL "an unreadable list — exit $rc, expected 1"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF ".version-bump.json is not a readable list of paths"; then
+  note FAIL "an unreadable list — failed, but blamed the manifests rather than the list"
+  fail=1
+else
+  note ok "an unreadable list — the enumerator's status gates the tool, not the tool's own luck"
+fi
+
+# ---- no snapshot is no verdict
+# The script's convention is 1 for "a check failed" and 2 for "no verdict". An
+# unwritable TMPDIR is the second and reported the first, because `set -euo
+# pipefail` turned a failed `mktemp -d` into exit 1 -- a release told it failed a
+# check, when no check had run.
+out="$(PATH="$TMP/bin:$PATH" TMPDIR="$TMP/nowhere/at/all" \
+  bash "$TOOL_DIR/scripts/check-release.sh" --head 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 2 ]; then
+  note FAIL "unwritable TMPDIR — exit $rc, expected 2 (no check ran)"
+  fail=1
+elif ! printf '%s\n' "$out" | grep -qF "no verdict"; then
+  note FAIL "unwritable TMPDIR — exit 2 without saying no check ran"
+  fail=1
+else
+  note ok "unwritable TMPDIR — refused as no verdict rather than as a failed check"
+fi
+
+# The control for this section, and the reason its legs are about what a path
+# reaches rather than about lists being unwelcome: the same helpers, the floor
+# and nothing else, and the run passes.
+INSIDE_CONTROL="$TMP/inside-control"
+inside_repo "$INSIDE_CONTROL"
+inside_list "$INSIDE_CONTROL"
+inside_seal "$INSIDE_CONTROL"
+
+out="$(inside_run "$INSIDE_CONTROL")" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF "manifests agree with each other"; then
+  note ok "the floor alone still snapshots and grades"
+else
+  note FAIL "the floor alone no longer grades (exit $rc) — nothing above proves anything"
+  fail=1
+fi
+
 # ------------------ the tag names this pack, and installs another repository
 # The three sections above put the tree and the commit at odds about what the
 # pack *is* — its version, then its name. This one is about what it hands an

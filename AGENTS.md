@@ -259,6 +259,43 @@ send the reader to `bump-version.sh --check`, which reads the list on disk, wher
 the path is fine, and passes. The tag was the input everyone looked at; this was
 the other one, and it arrived with the fix above.
 
+**Staying inside the tree is not the whole of what a listed path reaches, and
+neither is covering the floor.** `scripts/bump-version.sh` is relative,
+normalised and inside the tree, so the guard passes it; it is on no required
+field, so naming it narrows nothing; and it is the file check 1 *executes*. The
+tool was copied into the snapshot **before** the commit's own paths were
+materialised over it, so a list naming it replaced the tool with the commit's
+blob and the gate ran that. Measured 2026-08-06 against the gate carrying both
+the escape guard and the floor: a commit whose manifests genuinely disagree
+(`plugin.json` 1.0.0, `marketplace.json` `metadata.version` 9.9.9) shipped a
+two-line `bump-version.sh` that touched a file and exited 0, and the gate printed
+`ok manifests agree with each other`, `Release check passed.`, exit 0, with the
+touch performed. That is the promise below — not executing a `bash` script out of
+whichever commit a tag names — broken by copy order rather than by intent. The
+path is refused by name now, and the tool is copied in *last*, so the guarantee
+does not rest on having thought of every way to spell one path.
+
+Three more that neither mechanism can see, because none of them is about where a
+path points or which fields a list covers. `git show <rev>:<tree>` exits 0 and
+prints a tree's entry names, so a `RELEASE-NOTES.md/` **directory** whose one
+entry is named `## v0.4.1 (2026-08-06)` satisfied check 4 and the gate exited 0
+on a commit carrying no release notes; every object is confirmed a blob with `git
+cat-file -t` before its bytes are read now, which also refuses the specs `git
+show` reinterprets — given `<sha>:sub/../witness.txt` it fell through to its own
+revision DWIM and printed HEAD at exit 0. `dirname` without `--` read
+`-odd/extra.json` as `unknown option -- o`, leaving the parent unmade, so a
+commit that carries the file was called a disagreement: the refusing direction,
+on a path a git tree may perfectly well hold and the guard rightly allows. And
+the path enumerator ran in a process substitution, whose status a `while` loop
+never observes, so a dead enumerator meant zero lines and a *successful* snapshot
+of nothing. The floor does not cover that last one — it parses the list itself
+inside a `try`, so `{"path": 123, "field": "version"}` formats into its set while
+`sorted()` raises in the enumerator; list the three required fields beside it and
+the floor is satisfied while the loop reads nothing. Stub the tool to exit 0,
+which a gate is entitled to assume a tool may do, and that commit printed `ok
+manifests agree with each other` and exited 0. A `mktemp -d` that fails now exits
+2 rather than letting `set -e` claim the release failed a check that never ran.
+
 **Widening check 2 closed what a tag can claim and left open what the commit
 behind it hands over.** A tag is a name and a version, and both are now graded
 against the commit — but `plugins[0].source` in `.claude-plugin/marketplace.json`
