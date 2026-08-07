@@ -93,6 +93,70 @@ installing it so it can be invoked does.
   technique credits him. The `skills/<name>/` layout and the auto-discovered
   manifest follow `obra/superpowers`.
 
+## What arrives from outside
+
+Two things run here that nobody in this repository wrote: the actions the
+workflows call, and the one distribution they install.
+`scripts/check-supply-chain.sh` holds both, and `checks` runs it on both legs.
+
+**Every `uses:` names a commit, and says which release that commit was.** A
+major tag is not a version — it is a pointer its owner force-moves.
+`actions/checkout` ships an `update-main-version.yml` whose last step is
+`git push origin ${major} --force`, and upstream's `v6` sits eleven commits past
+`v6.0.0` as a result. So `@v7` meant "whatever that tag resolves to when the
+runner asks", and a green run on Monday was not evidence about Tuesday's. The
+trailing comment is half the pin and is checked too: a bare SHA is a fact nobody
+can re-check without cloning upstream and bisecting it, and a pin that cannot be
+audited is a pin that will not be. Re-checking one is a single call —
+`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`. Resolved 2026-08-06:
+`actions/checkout` v7.0.1, `actions/setup-python` v7.0.0,
+`actions/create-github-app-token` v2.2.2. That last one is the end of its line
+rather than a stale pin — upstream's current major is v3 — so moving it is a
+decision to take deliberately, not a version to bump absently.
+
+What this buys and what it does not: pinning moves the trust from "the tag owner
+will not repoint this" to "the commit named here was read once". Only the second
+is a thing a repository can hold itself to, and nothing here proves the pinned
+commit is benign or that the actions *it* calls are pinned in turn.
+
+**`persist-credentials: false` where nothing needs the credential, which today
+is `checks.yml` alone.** Every `git` call in that job is local plumbing or runs
+against a fixture under `$TMPDIR`, and it is the job that executes shell and
+Python out of a pull request's head. The three release checkouts keep theirs:
+each feeds a `git fetch origin`, and `publish-release.sh` asks `git ls-remote`
+whether a tag is already published. Those are served anonymously only while this
+repository is public, and a release gate is the wrong place to make correctness
+depend on that staying true.
+
+**Every distribution is declared in a requirements file, with a floor, and none
+is named on a pip command line.** `pytest` was named on that line with no
+version at all — a third-party package on every run, declared in no file,
+resolving to whatever was newest that morning. It was only ever the runner: the
+suite is stdlib `unittest` throughout, so it was deleted rather than bounded.
+The floor is a floor and not a range because
+`skills/better-skill-creator/requirements.txt` **ships** — `install.sh` copies
+the skill directory into `~/.claude/skills/` — so a ceiling would narrow what a
+user's machine may already satisfy in order to buy CI a property CI can have
+another way. `PyYAML>=5.4` rather than `>=5.1`: the code's own floor is 5.1
+(that release taught the Reader codepoints above 0xFFFF, and frontmatter carries
+emoji), while 5.4 is the highest version any published advisory names as fixed.
+None of those four advisories is reachable from here — all are `yaml.load` with
+the default or Full loader, and this package's one `yaml.load` passes a
+`SafeLoader` subclass — so the raise buys the machine something and this package
+nothing, which is the right trade for a file that lands on other people's disks.
+
+The check decides which files count from what the workflows install from, then
+follows `-r` includes out of those files, and only then adds anything tracked
+that looks like a requirements file. Selecting on the filename alone let a
+`dev-requirements.txt` carry an unbounded pin under a green tick — worse than no
+check, because the state it replaced at least failed honestly with the package
+visible on the pip line.
+
+Not covered, and worth knowing: `skills/upsum/scripts/checks.py` imports `yaml`
+behind a `try/except ImportError` and that skill ships no requirements file, so
+an optional dependency is declared nowhere. The check grades declarations that
+exist and is structurally blind to one that was never made.
+
 ## Adding a skill
 
 1. Create `skills/<name>/` with a `SKILL.md` whose frontmatter `name` matches the
