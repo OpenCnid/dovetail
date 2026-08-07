@@ -27,6 +27,16 @@
 # path; and check-release.sh's no-tag form then resolved an existing tag anyway.
 # Each step now names the mode it wants and `if:` decides which one runs, on
 # `github.event_name`, which is the field that actually distinguishes the events.
+#
+# What this is *not*, now that `release-publish.yml` exists: it is not what
+# stops a bad tag. It starts from `push: tags`, so the ref is on the remote
+# before this run is, and anything resolving `dovetail--v*` can fetch it while
+# these checks are still starting. This audits — it is the thing that notices a
+# tag which came from somewhere other than the publish workflow, which is
+# exactly the case a tag ruleset is meant to make impossible and worth watching
+# for anyway. `contents: read` below is load-bearing for that reading: write
+# would buy the ability to delete the tag it was triggered by, and a published
+# tag is a thing other people have installed.
 name: release
 
 on:
@@ -74,8 +84,13 @@ jobs:
       #
       # The ternary is kept even though `if:` already guarantees a tag push: it
       # is what makes `RELEASE_TAG` empty rather than unset in any case this
-      # workflow has not thought of, and check-release.sh refuses an empty tag by
-      # name instead of adopting it.
+      # workflow has not thought of. What an empty value then means is worth
+      # stating accurately, because this comment used to state it backwards:
+      # check-release.sh does not refuse an empty tag, it reads one as HEAD mode
+      # and says `No tag given`. That is a safe reading here — HEAD mode grades
+      # the checked-out commit and resolves no tag — but it is a different
+      # verdict from the one this step asked for, and `if:` is what keeps the
+      # case unreachable rather than the script.
       - name: Release check (tag)
         if: github.event_name == 'push'
         env:
