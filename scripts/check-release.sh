@@ -126,6 +126,15 @@
 # the name to compare against -- the one file opened before the shape is checked.
 # See the block above the check for why a release gate validates its own input.
 #
+# The tag is not the only input, which took a fix of its own. Grading a commit's
+# files rather than the checkout's means reading that commit's
+# `.version-bump.json` to learn which files those are -- so the commit under test
+# names the paths, and `snapshot` built a redirection target out of each one.
+# Bash opens a redirection target before the command runs, so `../x` truncated a
+# file outside the snapshot whatever `git show` then made of the argument. Paths
+# are validated at `snapshot` now, and a list that names one outside the tree
+# fails check 1 as itself rather than as manifests that disagree.
+#
 # Usage:
 #   bash scripts/check-release.sh                     # HEAD, as the tag the
 #                                                     #   manifests imply
@@ -280,10 +289,68 @@ fi
 SNAPSHOT="$(mktemp -d)"
 trap 'rm -rf "$SNAPSHOT"' EXIT
 
+# A path this tree could carry: relative, normalised, and inside itself. Three
+# of the four call sites below pass a literal and could not fail this. The
+# fourth, the loop in `snapshot_manifests`, passes whatever `.version-bump.json`
+# lists -- and that file is read out of the commit under test, so the commit
+# being graded chooses those bytes, exactly as whoever pushes a tag chooses the
+# tag name. It is the gate's second outside input, and it was the one nothing
+# validated.
+#
+# The patterns are grouped by what they refuse rather than golfed into one,
+# because the two groups are different arguments.
+snapshot_path_ok() {
+  case "$1" in
+    # No component may be empty, `.` or `..`, and the path may not be absolute.
+    # `..` is the traversal; the rest are the forms that make a denylist of `..`
+    # alone look sufficient. Refusing an unnormalised path that happens to stay
+    # inside is the safe direction and costs nothing -- nothing writes
+    # `./plugin.json` in a list of this pack's manifests, and a run that meets
+    # one says which path to repair.
+    ""|.|..|./*|../*|*/./*|*/../*|*/.|*/..|/*|*/|*//*) return 1 ;;
+    # Windows separates directories with a backslash, so the same bytes are one
+    # ordinary filename on Linux and a directory walk on `windows-latest`, where
+    # half of `checks` runs (measured 2026-08-06, git-bash 5.2.37(msys), Windows
+    # 10: `..\..\x` redirected to from two directories down truncated `x` and
+    # created nothing where it was written). A colon is a drive letter on the
+    # same platform, and `git show`'s own `<rev>:<path>` separator on every one.
+    #
+    # Quoted, and that is not style: an unquoted `*\\*` in a `case` pattern is
+    # `*\*`, which matches a literal asterisk and no backslash at all. Written
+    # that way this arm reads as covering Windows while covering nothing.
+    *'\'*|*:*) return 1 ;;
+  esac
+  return 0
+}
+
+# Set by `snapshot` when it refuses a path, rather than when `git show` fails to
+# find one. Those are different verdicts and check 1 reads this to tell them
+# apart: "this commit does not carry that manifest" is a disagreement about
+# manifests, and "that is not a path in this tree" is not a manifest question at
+# all.
+SNAPSHOT_REFUSED=""
+
 # Non-zero when the commit does not carry the path at all. Each caller reports
 # that as its own check failing rather than aborting the run: "this commit has
 # no RELEASE-NOTES.md" is a release-check answer, not a git error.
+#
+# The guard runs before `mkdir -p` and before the redirection, and the
+# redirection is the reason it has to. Bash opens a redirection target before
+# the command on the line ever runs, so a listed path of `../x` truncated `x`
+# outside `$SNAPSHOT` and *then* `git show` failed on a path no commit carries.
+# The gate printed FAIL -- correctly, and about manifests that disagree rather
+# than about the write -- while a file it was never asked to touch was already
+# empty, with `mkdir -p` having made the directories on the way. Reproduced
+# 2026-08-06 on git-bash 5.2.37(msys), Windows 10: a 36-byte canary outside the
+# snapshot came back 0 bytes, with `git show` failing as expected.
+#
+# Refused rather than clamped or resolved. A commit whose `.version-bump.json`
+# points outside its own tree is not a commit to repair on the fly.
 snapshot() {
+  if ! snapshot_path_ok "$1"; then
+    SNAPSHOT_REFUSED="$1"
+    return 1
+  fi
   mkdir -p "$SNAPSHOT/$(dirname "$1")"
   git show "$SHA:$1" > "$SNAPSHOT/$1" 2>/dev/null
 }
@@ -377,6 +444,13 @@ snapshot_manifests() {
 
 if snapshot_manifests && bash "$SNAPSHOT/scripts/bump-version.sh" --check >/dev/null 2>&1; then
   note ok "manifests agree with each other"
+# A refused path is not a disagreement, and reporting it as one sends the reader
+# to `bump-version.sh --check` -- which reads the list on disk, where the path is
+# fine, and passes. Nothing about the manifests was read here: the run stopped at
+# the list itself. Say which path, because that is the whole of the repair.
+elif [ -n "$SNAPSHOT_REFUSED" ]; then
+  note FAIL ".version-bump.json names a path outside the tree: $SNAPSHOT_REFUSED"
+  fail=1
 else
   # Named with the commit, because the copy on disk is a different file and
   # `--check` on it may well pass while this one fails -- that gap is the bug
