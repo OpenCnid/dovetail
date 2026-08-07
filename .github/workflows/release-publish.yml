@@ -106,7 +106,13 @@ jobs:
       # data handed to the action; `${{ }}` inside `run:` is substituted into
       # shell source before bash parses it, which is a different thing wearing
       # the same syntax.
-      - uses: actions/checkout@v7
+      #
+      # Pinned to a commit; `checks.yml` carries the reasoning. The credential
+      # stays for the reason `release.yml` gives — `Fetch main` below, and
+      # `publish-release.sh`'s `git ls-remote origin`, both address the real
+      # remote, and the second one refuses rather than skips when it cannot
+      # reach it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
@@ -157,7 +163,11 @@ jobs:
       actions: read
 
     steps:
-      - uses: actions/checkout@v7
+      # Same pin and the same reason for keeping the credential as `validate`
+      # above. This is the job holding `contents: write`, so it is the one where
+      # a moving `uses:` ref would matter most: whatever that tag pointed at
+      # would run beside a token that can create a tag, a ref and a release.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
@@ -187,10 +197,20 @@ jobs:
       # is not suppressed that way, so with the App configured the tag this
       # workflow creates is also audited by `release.yml` on arrival -- a second
       # verdict, from the path that grades a tag rather than a commit.
+      #
+      # The pin here records a decision rather than only a version. `v2` was
+      # resolved on 2026-08-06 to the commit below, which upstream calls
+      # `v2.2.2` and which is where the v2 line stopped: `v3.0.0` landed the
+      # next day, 2026-03-14, and upstream's current release is `v3.2.0`
+      # (2026-05-12). So this is not a pin that merely went stale — it is the
+      # end of a line, and staying on it is a choice to re-make rather than a
+      # default to inherit. Moving to v3 is a major upgrade of the step that
+      # mints the publishing identity, which is its own change with its own
+      # reading of the diff, not a side effect of writing a SHA down.
       - name: Mint the publishing identity
         id: app-token
         if: vars.RELEASE_BOT_APP_ID != ''
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}

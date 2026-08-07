@@ -60,7 +60,16 @@ jobs:
       # fetch-depth: 0 because the default is a one-commit shallow clone, and
       # `git merge-base --is-ancestor` on a graft point answers a question about
       # the truncation rather than about the history.
-      - uses: actions/checkout@v7
+      #
+      # Pinned to a commit; `checks.yml` carries the reasoning for why a major
+      # tag is not one. The credential this checkout persists is deliberately
+      # left in place, unlike there: the `Fetch main` step below reaches the
+      # real remote, and it is load-bearing — a stale `origin/main` is what
+      # makes a stale HEAD look current, which is the failure this gate stands
+      # in front of. That fetch is served anonymously only for as long as this
+      # repository is public, and a release gate is the wrong place to make
+      # correctness depend on that staying true.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 

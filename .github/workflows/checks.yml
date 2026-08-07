@@ -30,6 +30,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read, and only because the checkout needs it — nothing else in the job is
+# authorised at all: pip reaches PyPI, apt reaches Ubuntu's mirrors, and every
+# script below runs against local objects or a fixture under $TMPDIR. No
+# `GH_TOKEN` is exported here either, which is why the release gate's check 6
+# takes its skip branch rather than failing on a scope this block does not hold.
+#
+# Stated because this is the workflow that runs code from a pull request head.
 permissions:
   contents: read
 
@@ -47,18 +54,60 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v7
+      # Pinned to a commit rather than to `v7`, and the comment is what makes
+      # the pin re-checkable: a bare SHA says which code runs and nothing about
+      # whether it is still the code upstream calls v7.
+      #
+      # `@v7` is not a version, it is a pointer somebody else force-moves.
+      # `actions/checkout` ships `update-main-version.yml`, whose two steps are
+      # `git tag -f ${major}` and `git push origin ${major} --force`;
+      # `actions/setup-python` re-points its major from a `release: [released]`
+      # trigger. Both had moved before anybody here would have noticed: `v6` is
+      # eleven commits past `v6.0.0` upstream, and identical to `v6.1.0`. So a
+      # green run of this workflow is evidence about whatever those tags pointed
+      # at that morning, which is the thing a check is supposed to rule out.
+      #
+      # Re-checking a pin is one call — `gh api
+      # repos/actions/checkout/git/ref/tags/v7` — and the release name beside it
+      # is what turns the answer into agreement or disagreement.
+      # (Resolved 2026-08-06; both `v7` refs were lightweight, so the ref SHA is
+      # the commit SHA. Sibling patch tags in those repositories are annotated,
+      # where the ref SHA would be a tag object instead.)
+      #
+      # `persist-credentials: false` because no step below this one addresses
+      # the remote: every `git` call they reach is local plumbing or runs
+      # against a fixture repository under $TMPDIR, and the release test
+      # scripts stub `gh` onto PATH. Stated without a step count on purpose —
+      # a number here would go stale silently the next time a step is added,
+      # and the property to re-check is "does it touch the remote", not "are
+      # there still N of them". This is also the job where persisting
+      # costs something — on `pull_request` it runs shell and Python out of the
+      # proposed head, and the credential would sit in that tree's .git/config
+      # buying no step anything. The release workflows keep theirs, and say why.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
-      # PyYAML is the skill's one non-stdlib runtime dependency; pytest is the
-      # runner. The tests themselves are stdlib unittest and run either way.
+      # PyYAML is the skill's one non-stdlib dependency, and after this line CI
+      # installs nothing else.
+      #
+      # `pytest` used to sit ahead of the `-r`, named on the command line with
+      # no version at all: a third-party package on every run, declared in no
+      # file, resolving to whatever was newest that morning, and invisible to
+      # any check because nothing reads a pip line for package names. It was
+      # only ever the runner — the comment that used to be here said so, and it
+      # was right. Every test in the suite is stdlib `unittest`, and all 789 of
+      # them pass with no third-party runner installed at all (measured
+      # 2026-08-06, CPython 3.13.1, Windows 10 10.0.19045: `Ran 789 tests …
+      # OK (skipped=2)`). Deleting a dependency is better than bounding one.
       - name: Install dependencies
         run: >-
           python -m pip install --disable-pip-version-check --quiet
-          pytest -r skills/better-skill-creator/requirements.txt
+          -r skills/better-skill-creator/requirements.txt
 
       # Preinstalled on GitHub's Ubuntu images, but installing when absent keeps
       # --strict below from turning a missing tool into a red build.
@@ -89,6 +138,19 @@ jobs:
       - name: Shell lint
         shell: bash
         run: bash scripts/lint-shell.sh ${{ runner.os == 'Linux' && '--strict' || '' }}
+
+      # The third-party half of what this workflow runs. Everything above grades
+      # code written here; this grades the code that arrives from somewhere else
+      # — every `uses:` naming a commit rather than a tag its owner force-moves,
+      # and every Python distribution named in a requirements file with a floor
+      # rather than on a pip command line where no policy check looks.
+      #
+      # It runs on both legs even though its subject is platform-independent:
+      # the two runners resolve `git ls-files` and glob paths differently enough
+      # that a check about file selection is worth asking on each.
+      - name: Supply chain
+        shell: bash
+        run: bash scripts/check-supply-chain.sh
 
       # The release gate takes two inputs from outside itself. One is the tag
       # name, chosen by whoever pushes it: this asserts no workflow interpolates
@@ -138,7 +200,17 @@ jobs:
         shell: bash
         run: bash scripts/test-release-integrity.sh
 
+      # `-s tests -t .` rather than a bare `discover`: `tests/` is a package and
+      # its modules import siblings as `tests.<name>`, so the top level has to
+      # stay the skill root or those imports do not resolve.
+      #
+      # One consequence of dropping pytest, named here rather than discovered:
+      # a bare `def test_x()` at module level is a test to pytest and is not one
+      # to `unittest`, which collects `TestCase` subclasses. Nothing in the
+      # suite is written that way today — there is no `import pytest` and no
+      # `pytest.` anywhere under this skill — but a test added in that style
+      # would not run rather than fail, which is the quiet direction.
       - name: Tests
         shell: bash
         working-directory: skills/better-skill-creator
-        run: python -m pytest -q
+        run: python -m unittest discover -s tests -t . -q
