@@ -28,6 +28,18 @@ capabilities is checkable, and it's the same decision:
 Everything below is a consequence of one of those four being absent. If you have all four, you're in
 the main flow and don't need this file.
 
+One version fact rides on the third row rather than on PATH alone: the optimization scripts pass
+`--permission-mode dontAsk` by default, which `claude --help` lists on 2.1.223. A CLI old enough to
+reject that value fails loudly rather than silently — a probe whose child exits non-zero is recorded
+as an `error`, not as a non-trigger, and on the improvement call the non-zero exit becomes a
+`RuntimeError` that stops the loop. Either way it reads as a broken harness, which is what it is.
+
+`--permission-mode default` is the fallback there, not `manual`: `manual` is only an alias, and it
+"require[s] Claude Code v2.1.200 or later", so a CLI too old for `dontAsk` is likely too old for
+`manual` too. `default` is the config-value spelling of the same mode and has no version floor.
+(Checked 2026-08-06 on 2.1.223: `claude --permission-mode default --help` exits 0, though `claude
+--help` does not list `default` among the choices it prints.)
+
 ## Claude.ai
 
 **No sub-agents.** You can't run independent test executions, so read the skill's SKILL.md and follow

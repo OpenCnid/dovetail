@@ -4,6 +4,14 @@
 Takes eval results (from run_eval.py) and generates an improved description
 by calling `claude -p` as a subprocess (same auth pattern as run_eval.py —
 uses the session's Claude Code auth, no separate ANTHROPIC_API_KEY needed).
+
+That call is bounded the same way a probe is, and for the same reason: its
+prompt embeds the entire SKILL.md body under test, which arrived from wherever
+the skill did. `run_eval.SAFE_PERMISSION_MODE` is the default here too, and
+`--allow-host-permissions` is the one way past it. Hardening the probes and
+leaving this path open would have moved the hole rather than closed it — of the
+two `claude -p` launchers in this skill, this was the one with no permission
+control at all, and it is also the one that runs in the user's own repository.
 """
 
 import argparse
@@ -14,11 +22,27 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.run_eval import check_skill_md_encoding, claude_argv, load_json_file
+from scripts.run_eval import (
+    INHERIT_PERMISSION_MODE,
+    PERMISSION_MODES,
+    SAFE_PERMISSION_MODE,
+    SAFE_PERMISSION_MODES,
+    check_permission_mode,
+    check_skill_md_encoding,
+    claude_argv,
+    load_json_file,
+    validate_permission_mode,
+)
 from scripts.utils import configure_console, parse_skill_md
 
 
-def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
+def _call_claude(
+    prompt: str,
+    model: str | None,
+    timeout: int = 300,
+    permission_mode: str | None = SAFE_PERMISSION_MODE,
+    allow_host_permissions: bool = False,
+) -> str:
     """Run `claude -p` with the prompt on stdin and return the text response.
 
     Prompt goes over stdin (not argv) because it embeds the full SKILL.md
@@ -32,8 +56,37 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
     ``subprocess.run(text=True, input="... → ...")`` raises "'charmap'
     codec can't encode character '\\u2192'". ``errors="replace"`` on the way back
     keeps a malformed byte on the wire from turning a paid call into a crash.
+
+    ``permission_mode`` resolves through ``run_eval.validate_permission_mode``,
+    so ``None`` means the safe mode rather than the host's settings and the one
+    spelling that omits the flag is ``inherit``. This call asks for text and
+    needs no tool at all, so the mode costs it nothing it uses -- but the mode
+    is what stops it *reaching* for one, and this prompt is assembled out of a
+    third-party SKILL.md.
+
+    **This call is the looser of the two, and it is worth knowing why.** A probe
+    runs with ``cwd`` set to a fresh temp directory and ``--setting-sources
+    project,local``. Neither is true here: ``subprocess.run`` below passes no
+    ``cwd``, so the child inherits the caller's -- the user's own repository --
+    and no ``--setting-sources`` means every scope loads, user settings
+    included. Under ``dontAsk`` the allow rules are what still grants, so a
+    permissive rule of the user's own is in force here in a way it is not for a
+    probe -- as is anything a PreToolUse hook approves.
+
+    What ``SAFE_PERMISSION_MODE`` removes is the unbounded case. What would
+    remove most of the rest is the CLI's ``--tools ""``, free for a call that
+    uses no tool -- though it "doesn't affect MCP tools", so closing those needs
+    ``--disallowedTools "mcp__*"`` as well. It is not passed here because this
+    change verified only that the flag parses (``claude --tools "" --help``
+    exits 0), never what the resulting session does, and that check costs a
+    billed run. Giving this call a temp ``cwd`` and ``--setting-sources`` of its
+    own would close the rest. Both are follow-ups rather than part of this
+    change.
     """
     cmd = [*claude_argv(), "-p", "--output-format", "text"]
+    mode = validate_permission_mode(permission_mode, allow_host_permissions)
+    if mode != INHERIT_PERMISSION_MODE:
+        cmd.extend(["--permission-mode", mode])
     if model:
         cmd.extend(["--model", model])
 
@@ -70,8 +123,15 @@ def improve_description(
     test_results: dict | None = None,
     log_dir: Path | None = None,
     iteration: int | None = None,
+    permission_mode: str | None = SAFE_PERMISSION_MODE,
+    allow_host_permissions: bool = False,
 ) -> str:
     """Call Claude to improve the description based on eval results.
+
+    ``permission_mode`` and ``allow_host_permissions`` are handed straight to
+    :func:`_call_claude` for both of the calls this function can make -- the
+    first one and the over-length rewrite below it. The rewrite is a second
+    billed session and is easy to miss when threading a parameter through.
 
     ``test_results`` puts the **held-out** score into the prompt. ``run_loop``
     deliberately never passes it: selection is by held-out score, so an
@@ -175,7 +235,12 @@ I'd encourage you to be creative and mix up the style in different iterations si
 
 Please respond with only the new description text in <new_description> tags, nothing else."""
 
-    text = _call_claude(prompt, model)
+    text = _call_claude(
+        prompt,
+        model,
+        permission_mode=permission_mode,
+        allow_host_permissions=allow_host_permissions,
+    )
 
     match = re.search(r"<new_description>(.*?)</new_description>", text, re.DOTALL)
     description = match.group(1).strip().strip('"') if match else text.strip().strip('"')
@@ -205,7 +270,12 @@ Please respond with only the new description text in <new_description> tags, not
             f"important trigger words and intent coverage. Respond with only "
             f"the new description in <new_description> tags."
         )
-        shorten_text = _call_claude(shorten_prompt, model)
+        shorten_text = _call_claude(
+            shorten_prompt,
+            model,
+            permission_mode=permission_mode,
+            allow_host_permissions=allow_host_permissions,
+        )
         match = re.search(r"<new_description>(.*?)</new_description>", shorten_text, re.DOTALL)
         shortened = match.group(1).strip().strip('"') if match else shorten_text.strip().strip('"')
 
@@ -249,8 +319,32 @@ def main():
     parser.add_argument("--skill-path", required=True, help="Path to skill directory")
     parser.add_argument("--history", default=None, help="Path to history JSON (previous attempts)")
     parser.add_argument("--model", required=True, help="Model for improvement")
+    parser.add_argument("--permission-mode", default=SAFE_PERMISSION_MODE,
+                        choices=PERMISSION_MODES,
+                        help=f"Passed to claude -p. The prompt embeds the whole SKILL.md "
+                             f"body under test, so this session takes a probe's permission "
+                             f"mode -- though unlike a probe it runs in your working "
+                             f"directory and loads every settings scope. "
+                             f"'{SAFE_PERMISSION_MODE}' is the default because it "
+                             f"auto-denies any call it was not pre-approved for. "
+                             f"'{INHERIT_PERMISSION_MODE}' passes no flag at all and takes "
+                             f"your permission settings. Any mode outside "
+                             f"{', '.join(sorted(SAFE_PERMISSION_MODES))} needs the "
+                             f"--allow-host-permissions opt-in as well.")
+    parser.add_argument("--allow-host-permissions", action="store_true",
+                        help=f"Permit a --permission-mode outside "
+                             f"{', '.join(sorted(SAFE_PERMISSION_MODES))}, including "
+                             f"'{INHERIT_PERMISSION_MODE}'. Without this, a mode that lets "
+                             f"the session act on this machine is refused before the call "
+                             f"is made. Pass it deliberately.")
     parser.add_argument("--verbose", action="store_true", help="Print thinking to stderr")
     args = parser.parse_args()
+
+    # Before the file reads below it, for the reason check_permission_mode
+    # gives: this is the last point where refusing costs nothing.
+    permission_mode = check_permission_mode(
+        args.permission_mode, args.allow_host_permissions
+    )
 
     skill_path = Path(args.skill_path)
     if not (skill_path / "SKILL.md").exists():
@@ -280,6 +374,8 @@ def main():
         eval_results=eval_results,
         history=history,
         model=args.model,
+        permission_mode=permission_mode,
+        allow_host_permissions=args.allow_host_permissions,
     )
 
     if args.verbose:
