@@ -490,5 +490,47 @@ pass vacuously. That section names `$TMPDIR` rather than guessing where `..`
 lands. It runs in `checks`; if you add a workflow, it will also tell you if a
 `run:` body reads an attacker-nameable context.
 
+## The branch protecting the gate
+
+This whole section argues one thing: green checks are worth nothing unless they
+ran on the commit in question. That argument does not stop at the release gate.
+It applies to `main` itself, and `main` was not holding to it.
+
+Required checks on `main` are `ubuntu-latest` and `windows-latest`, and until
+2026-08-07 they carried `strict: false` — checks had to be green, but the branch
+did not have to be *current*. A `pull_request` run checks out the branch merged
+into `main` as of when it ran, so the moment another PR lands, that result
+describes a combination that no longer exists, and nothing re-runs it. Measured
+on this repository the night it bit: #31's checks went green at 01:16 against
+`main` at `562fe1e` and the merge button stayed lit at 01:30. Nothing landed in
+between, so nothing broke — the protection was sound by luck, which is the state
+this file exists to name rather than to enjoy. #29 and #30 had already landed
+under #31 while it was open, so the window was not hypothetical that night.
+
+The push-to-`main` run is the backstop, and it is the wrong shape: it reports
+after the thing has landed, which is the `0.4.0` failure with a smaller blast
+radius rather than a different structure.
+
+So `strict: true`. A branch merges only when it is up to date, which means the
+checks that authorise a merge ran on the tree the merge produces. The cost is
+real and worth stating: when two PRs touch one file, the second one updates and
+waits for a rerun, and merges serialise. `allow_auto_merge` is off, so that wait
+is a manual loop; turning it on is the obvious relief if the serialisation
+starts to hurt, and `gh pr merge --auto` is what would use it.
+
+`enforce_admins: true` alongside it, because a required check every admin can
+wave through is a required check for everybody except the people merging fastest,
+and this repository is mostly merged by one of them.
+
+Squash is the only merge method now. That is not only tidiness: rebase merges
+put each commit on `main` under its own subject with no PR number, so `(#NN)` was
+present on some commits and absent on others for reasons unrelated to how they
+were reviewed. #29 and #30 both went through review and neither is suffixed, and
+that inconsistency was read here — in this session, out loud — as evidence they
+had bypassed review entirely. A convention that is only sometimes true is worse
+than none, because it invites exactly that inference. Every commit on `main`
+carries its PR number now, and `gh api repos/{owner}/{repo}/commits/<sha>/pulls`
+is the query that actually answers the question.
+
 A published tag is a thing other people have installed. When it is wrong, the
 fix is a new version, not a moved tag.
