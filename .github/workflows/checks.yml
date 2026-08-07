@@ -124,6 +124,20 @@ jobs:
         shell: bash
         run: bash scripts/test-release-publish.sh
 
+      # The third question about a release, and the one the other two cannot
+      # ask: given a tag that already shipped, what is actually established
+      # about it. `check-release.sh` resolves a tag with `git rev-list -n 1`,
+      # which reaches the commit through an annotated object and a lightweight
+      # ref alike, so the tag object itself — and whether anything vouches for
+      # it — is invisible to the gate by construction. This asserts that
+      # `verify-release.sh` reports the three states apart: established, a real
+      # negative, and could-not-ask. The last is the one worth a CI step, because
+      # a verifier that reports an unverifiable signature as a pass is
+      # indistinguishable from one that verified something.
+      - name: Release-integrity tests
+        shell: bash
+        run: bash scripts/test-release-integrity.sh
+
       - name: Tests
         shell: bash
         working-directory: skills/better-skill-creator
