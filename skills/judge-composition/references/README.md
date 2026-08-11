@@ -62,7 +62,6 @@ Mirrored from the Trellis repository at commit `65fdb1f`, dated 2026-07-25.
 | `PROGRAM_CONTEXT.md` | `docs/product/epistemic-support/PROGRAM_CONTEXT.md` | 25,401 | `e240ce3f6cb06df6bd577ecb1714c6fd612cbf049b0d705266c1da68644f593b` |
 | `RECONCILIATION.md` | `docs/product/epistemic-support/RECONCILIATION.md` | 46,647 | `a88c9539e88033825a2f65b70a4634c4cf0dd1d4c2e4966fc9021234f298e14d` |
 | `STANDING_MODEL.md` | `docs/product/epistemic-support/STANDING_MODEL.md` | 8,825 | `484fc3c860e834a8afaed6dff6741c585ec3464c7466b09ad3d8421932904cfd` |
-| `TEST_TIME_TRAINING.md` | `docs/architecture/TEST_TIME_TRAINING.md` | 64,208 | `9fd170da66d4d5f57213057ab9bf12a9131346283dd5a304ee79049cb42d5302` |
 
 **A caution on the byte counts and digests above.** They were recorded against a
 CRLF working copy. The files as committed here are LF-normalised by
@@ -94,7 +93,6 @@ outside this repository.
 | `PROGRAM_CONTEXT.md` | `84a6bf4ab29c687483b0d92d3c762170b83a9f58` |
 | `RECONCILIATION.md` | `ca8b605f2b92ecc8468d3446c589a1312bc288ad` |
 | `STANDING_MODEL.md` | `bc0eb064538f23c9f33550aec1d4980d251ed632` |
-| `TEST_TIME_TRAINING.md` | `c3dddfb19bef9aaad13953aaf6e2f1d67192750b` |
 
 `DOUBTS_WORKSPACE.md` carries the same blob SHA in the `self-play` skill, which
 mirrors it from the same content at a different commit. Two skills arriving at
