@@ -77,7 +77,7 @@ A judge that cannot fail is not a judge — Step 3 gates it. Why not fewer roles
 
 Check the composed cover and **refuse, typed, on failure**, then retry composition; repeated failure ends the ceremony with a report rather than judging with a defective cover:
 
-- **Validity** — no seat's anchors are all-pass, all-fail, or all-abstain. This is the **positive-control duty applied at composition time**: a seat that cannot fire on its own anchors is a blind instrument, and its `clean` is noise (`TEST_TIME_TRAINING.md` §6; the `self-play` skill).
+- **Validity** — no seat's anchors are all-pass, all-fail, or all-abstain. This is the **positive-control duty applied at composition time**: a seat that cannot fire on its own anchors is a blind instrument, and its `clean` is noise.
 - **Coverage** — the seats cover the characterized domain; the candidate lies inside it by construction, so coverage is checkable without ever privileging the claim.
 - **Overlap** — seats are pairwise disjoint in their qualified parameters, **or** overlapping with a declared gluing rule. A cover normally overlaps, and gluing happens there: the no-global-section outcome withholds same-jurisdiction conflicts as typed forks rather than blending them.
 - **Falsifiability** — every seat has an abstention path and a way to fail.
