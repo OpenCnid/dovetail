@@ -101,6 +101,7 @@ else
   smoke_home="$(mktemp -d)"
   dry_home=""
   project_dir=""
+  occupied_project=""
   redirect_project=""
   redirected_destination=""
   skills_redirect_project=""
@@ -109,7 +110,7 @@ else
   linkfile_fixture=""
   cleanup() {
     rm -rf "$smoke_home" "${dry_home:-}" "${project_dir:-}" \
-      "${redirect_project:-}" "${redirected_destination:-}" \
+      "${occupied_project:-}" "${redirect_project:-}" "${redirected_destination:-}" \
       "${skills_redirect_project:-}" "${skills_redirected_destination:-}" \
       "${bridge_alias_project:-}" "${linkfile_fixture:-}"
   }
@@ -197,6 +198,21 @@ else
       fi
     done
     [ "$fail" -eq 0 ] && note ok installer "project copy"
+  fi
+
+  # Project installs must start from an absent .agents directory. This rejects
+  # links, junctions, and unrelated existing agent layouts without depending on
+  # platform-specific redirect detection.
+  occupied_project="$(mktemp -d)"
+  mkdir -p "$occupied_project/.agents"
+  if (cd "$occupied_project" && bash "$ROOT/scripts/install-codex.sh" --project >/dev/null 2>&1); then
+    note FAIL installer "accepted an occupied project .agents directory"
+    fail=1
+  elif [ -e "$occupied_project/.agents/skills/prompt-engineering/SKILL.md" ]; then
+    note FAIL installer "wrote into an occupied project .agents directory"
+    fail=1
+  else
+    note ok installer "occupied project destination refused"
   fi
 
   # A project-controlled .agents link can redirect --project outside the

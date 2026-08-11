@@ -30,41 +30,21 @@ for arg in "$@"; do
 done
 
 # Running --project from this checkout would replace the checked-in links with
-# copies of their own source. Codex already discovers those links; refuse rather
-# than turn a convenience flag into source divergence. Existing destination
-# components must also resolve exactly inside the selected project: this blocks
-# symlinks, Windows junctions, and other reparse redirects before any copy or
-# --force removal can leave the project tree.
+# copies of their own source. More generally, project install is intentionally a
+# first-install operation: it requires .agents to be absent. That simple
+# fail-closed boundary avoids following symlinks, junctions, or any existing
+# agent layout on platforms with different redirect semantics.
 if [ "$PROJECT" -eq 1 ]; then
   AGENTS_DIR="$(dirname "$DEST")"
   if [ "$DEST" = "$ROOT/.agents/skills" ]; then
     echo "error: --project from the Dovetail checkout would overwrite .agents/skills." >&2
-    echo "       Run Codex here without installing, or invoke this script from the target project." >&2
+    echo "       Run Codex here without installing, or invoke this script from a new target project." >&2
     exit 2
   fi
-  if [ -L "$AGENTS_DIR" ]; then
-    echo "error: --project refuses a symlinked .agents destination." >&2
-    echo "       Use a real directory inside the target project." >&2
+  if [ -e "$AGENTS_DIR" ] || [ -L "$AGENTS_DIR" ]; then
+    echo "error: --project requires the target project's .agents directory to be absent." >&2
+    echo "       Refusing an existing agent layout to prevent redirected writes." >&2
     exit 2
-  fi
-  if [ -e "$AGENTS_DIR" ]; then
-    if [ ! -d "$AGENTS_DIR" ] || [ "$(cd "$AGENTS_DIR" && pwd -P)" != "$AGENTS_DIR" ]; then
-      echo "error: --project refuses a redirected .agents destination." >&2
-      echo "       Use a real directory inside the target project." >&2
-      exit 2
-    fi
-  fi
-  if [ -L "$DEST" ]; then
-    echo "error: --project refuses a symlinked .agents/skills destination." >&2
-    echo "       Use a real directory inside the target project." >&2
-    exit 2
-  fi
-  if [ -e "$DEST" ]; then
-    if [ ! -d "$DEST" ] || [ "$(cd "$DEST" && pwd -P)" != "$DEST" ]; then
-      echo "error: --project refuses a redirected .agents/skills destination." >&2
-      echo "       Use a real directory inside the target project." >&2
-      exit 2
-    fi
   fi
 fi
 

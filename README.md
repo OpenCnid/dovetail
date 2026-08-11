@@ -85,7 +85,9 @@ bash scripts/install-codex.sh
 
 That copies the eight skills to `~/.agents/skills`. To copy them into another
 project instead, run `/path/to/dovetail/scripts/install-codex.sh --project` from
-that target project. The script refuses `--project` in this checkout, because
+a target project **that has no `.agents/` directory yet**. Project install fails
+closed when `.agents/` already exists, rather than risking a write through another
+agent layout. The script also refuses `--project` in this checkout, because
 Codex already sees the source links here and replacing them with copies would
 create two editable trees.
 
