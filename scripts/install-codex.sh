@@ -42,14 +42,24 @@ if [ "$PROJECT" -eq 1 ]; then
     echo "       Run Codex here without installing, or invoke this script from the target project." >&2
     exit 2
   fi
-  if [ -e "$AGENTS_DIR" ] || [ -L "$AGENTS_DIR" ]; then
+  if [ -L "$AGENTS_DIR" ]; then
+    echo "error: --project refuses a symlinked .agents destination." >&2
+    echo "       Use a real directory inside the target project." >&2
+    exit 2
+  fi
+  if [ -e "$AGENTS_DIR" ]; then
     if [ ! -d "$AGENTS_DIR" ] || [ "$(cd "$AGENTS_DIR" && pwd -P)" != "$AGENTS_DIR" ]; then
       echo "error: --project refuses a redirected .agents destination." >&2
       echo "       Use a real directory inside the target project." >&2
       exit 2
     fi
   fi
-  if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+  if [ -L "$DEST" ]; then
+    echo "error: --project refuses a symlinked .agents/skills destination." >&2
+    echo "       Use a real directory inside the target project." >&2
+    exit 2
+  fi
+  if [ -e "$DEST" ]; then
     if [ ! -d "$DEST" ] || [ "$(cd "$DEST" && pwd -P)" != "$DEST" ]; then
       echo "error: --project refuses a redirected .agents/skills destination." >&2
       echo "       Use a real directory inside the target project." >&2
