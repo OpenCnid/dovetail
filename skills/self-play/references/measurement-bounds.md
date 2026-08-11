@@ -113,23 +113,13 @@ design rule; they are the same duty read from two ends.
 
 ## Provenance
 
-These bounds are the portable statement of house rules the origin repository
-carries as `.claude/rules/measurement-and-reporting.md` (rules 8, 11, 19(c) and
-20). The substance a self-play run depends on is restated here in full, and this
-file is what the skill cites — so nothing here requires opening anything else.
+These bounds are the self-play skill's portable, installable measurement
+contract. The requirements a run depends on are stated here in full; the related
+`measurement-and-reporting.md` preserves the detailed rule discussion as a local
+restatement. Neither document needs an external research record or a byte-pinned
+mirror to determine how a self-play run is measured or reported.
 
-**Because those rules are cited by number, the rule text ships here too.** A
-restatement alone cannot settle what "rule 19(c)" says; only the bytes it was
-written against can. The source is mirrored byte-for-byte at
-[`measurement-and-reporting.md`](measurement-and-reporting.md) — extracted at
-commit `07bd744` and verified by blob SHA — so the restatement above is checkable
-against its source from inside this repository.
-
-**This provenance note has been corrected twice.** An early version said the
-source could not be opened by anyone outside the originating repository; that was
-wrong, and it was replaced with a live link. **The live link was also wrong** —
-the origin repository is deprecated and will be archived or deleted, so a URL
-into it would have rotted and taken the only check with it. The mirror replaces
-the link. Where the mirror and any surviving copy of the origin ever disagree,
-**the mirror in this repository is what this skill's claims were written
-against**, and it is the one that settles the reading here.
+The named sections are local navigation labels. They preserve the distinctions
+the skill needs — engineering target versus failure-mode probe, correctness
+versus cost, positive versus negative control, and a verification observed to
+fail — without claiming authority from an unrelated research track.

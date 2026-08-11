@@ -1,5 +1,8 @@
 # Measurement and reporting
 
+> Local restatement. This file is no longer a byte-pinned mirror and does not
+> require access to an external research record.
+
 Sessions that design a test, run a drill or benchmark, or publish a number
 work under `AGENTS.md` rules 8, 11, 19(c) and 20, which keep their numbers
 here and stay citable by them. Two failures produced these rules: a null
@@ -53,8 +56,7 @@ in this repository has one term: correctness. Tool-call counts, citation
 counts, token counts and dollars are descriptive figures that travel beside
 every correctness figure in the same table, and what they describe is the
 cost of that correctness. An arm that cuts tokens or calls while
-correctness drops has failed on the one term there is
-(`docs/architecture/TEST_TIME_TRAINING.md` §6).
+correctness drops has failed on the one term there is.
 
 ## Rule 11 — a null becomes a finding once the run's own control discriminated
 
@@ -62,8 +64,7 @@ Reports publish the counts and the raw numbers behind every rate. Exactly
 one thing turns a null, a win, or any surprising result into a finding: the
 same run's positive control discriminated on the same instrument — a
 condition built so the untreated arm demonstrably fails, then shown to move
-under the treatment (the positive-control duty,
-`docs/architecture/TEST_TIME_TRAINING.md` §6). A run whose control stayed
+under the treatment. A run whose control stayed
 silent was a blind test; its output is noise, the report names it noise, and
 the number stays unbelieved until a discriminating control exists. This is
 19(c) applied to experiments: an experiment seen to produce a positive is
