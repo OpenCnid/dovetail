@@ -5,14 +5,14 @@
        alt="The pack in three tiers. First, what each one gives you alone — a team of you running at once, a court for your own work, a model that plays itself to find the move, and so on. Second, what a group unlocks that no member can: the gate, the clean room, and what outlives the session, each labelled with how well it is evidenced. Third, all eight cut as a dovetail joint, coloured in runs of two, three and three by their group.">
 </p>
 
-**Eight skills that make Claude Code better at checking its own work.**
+**Eight skills that make Claude Code and Codex better at checking their own work.**
 
 [![license](https://img.shields.io/badge/license-CC_BY_4.0-3b7ddd)](LICENSE.md)
 ![skills](https://img.shields.io/badge/skills-8-58a6ff)
 
-A skill is just a page of instructions that Claude reads when it's relevant. You
-don't have to call them or configure them. You describe what you want in normal
-words, and the right one shows up.
+A skill is a page of instructions an agent reads when it's relevant. You don't
+have to configure the six automatic skills: describe what you want in normal
+words, and the matching one shows up.
 
 These eight cover the parts of AI work that tend to go wrong quietly: writing
 clear instructions, handing a job to a helper agent, checking whether an answer
@@ -20,10 +20,16 @@ actually holds up, and ending a session without losing what you learned.
 
 ## Install
 
+Dovetail has additive paths for **Claude Code** and **Codex**. Both use the
+same `skills/` source tree; the existing Claude plugin folders and workflows
+stay in place.
+
+### Claude Code
+
 One way, about a minute. You get all eight skills in every project on your
 computer.
 
-### Ask your agent to do it
+#### Ask your agent to do it
 
 Paste this into Claude Code:
 
@@ -36,7 +42,7 @@ Paste this into Claude Code:
 > Use the full `https://` address exactly as written. When it's done, tell me
 > which `dovetail:` skills you can see.
 
-### Or type it yourself
+#### Or type it yourself
 
 In Claude Code:
 
@@ -56,7 +62,36 @@ If your agent did the install for you partway through a session, run
 Skills from a plugin get a name prefix, so they can't clash with anything you
 already have. You'll see them as `dovetail:self-play` and so on.
 
+### Codex
+
+From a Dovetail checkout, start Codex in the repository root. Codex discovers
+all eight skills through the checked-in `.agents/skills/` links, which point back
+to the shared `skills/` folders. If a Windows Git checkout cannot materialize
+those links as folders, use the installer below instead; it copies the full
+skill directories and does not depend on symlink support:
+
+```bash
+git clone https://github.com/OpenCnid/dovetail.git
+cd dovetail
+codex
+```
+
+To install independent user copies for any Codex workspace, run this from the
+Dovetail checkout:
+
+```bash
+bash scripts/install-codex.sh
+```
+
+That copies the eight skills to `~/.agents/skills`. To copy them into another
+project instead, run `/path/to/dovetail/scripts/install-codex.sh --project` from
+that target project. The script refuses `--project` in this checkout, because
+Codex already sees the source links here and replacing them with copies would
+create two editable trees.
+
 ## Did it work?
+
+### Claude Code
 
 Ask Claude: **"what skills do you have?"**
 
@@ -73,10 +108,20 @@ one-line descriptions, which is all Claude holds until a skill actually fires.
 The full instructions load only when one is needed. (Measured 2026-08-05 with
 `claude plugin details dovetail`, which will tell you the current number.)
 
+### Codex
+
+Run `/skills`, or type `$`, from the Dovetail checkout. You should see all eight
+skills. Codex uses the source folders through `.agents/skills/`, so each skill's
+name and instructions are the same files Claude Code receives.
+
+`$spark-steering` and `$upsum` remain explicit-only. They are visible in Codex's
+skill picker, but their Codex policies prevent automatic matching; type the
+`$` name when you want either workflow.
+
 ## Using them
 
-**Six of them run on their own.** You don't need to remember any names. Say what
-you're doing and the matching skill loads itself.
+**Six of them run on their own.** You don't need to remember any names. In
+Claude Code or Codex, say what you're doing and the matching skill loads itself.
 
 | Say something like | What kicks in |
 |---|---|
@@ -86,26 +131,23 @@ you're doing and the matching skill loads itself.
 | "does this design hold up, really?" | `self-play` |
 | "turn this into a skill I can reuse" | `better-skill-creator` |
 
-**Two of them you type yourself**, as slash commands:
+**Two need explicit invocation** because they would be noisy if they ran on
+every matching request:
 
-- `/upsum` — at the end of a session. Writes down what happened and what's still
-  open, so your next session doesn't start from scratch.
-- `/spark-steering` — before you add another plugin, rule, or MCP server. Works
-  out what's actually missing first, so you don't install something permanent to
-  fix something temporary.
+| Workflow | Claude Code | Codex |
+|---|---|---|
+| Close a session with its durable state | `/upsum` (often `/dovetail:upsum`) | `$upsum` |
+| Diagnose the missing SPARK axis before installing a fix | `/spark-steering` (often `/dovetail:spark-steering`) | `$spark-steering` |
 
-Start typing `/ups` or `/spark` and pick from the menu that appears. Installed
-as a plugin they may be listed as `/dovetail:upsum` and `/dovetail:spark-steering`,
-so let the autocomplete fill in the exact name.
-
-These two are hidden from Claude on purpose. It genuinely cannot see them: ask
-"do you have spark-steering?" and it will say no. It isn't being difficult, the
-skill is kept out of its list. Typing it yourself loads it normally.
+Claude Code hides these two from its automatic skill list; typing the command
+loads them normally. Codex keeps them visible in `/skills` but uses
+`agents/openai.yaml` to reject implicit invocation, so typing the `$` name is
+still required.
 
 The reason is that both would be annoying if they volunteered. A "what's
 actually missing here?" check that pipes up every turn is a tax on every turn.
 A session-closing ceremony that fires by itself runs on every throwaway chat.
-So you decide when. (Confirmed on Claude Code CLI 2.1.214.)
+So you decide when. (Claude Code behavior confirmed on CLI 2.1.214.)
 
 ## The eight skills
 
@@ -117,8 +159,8 @@ So you decide when. (Confirmed on Claude Code CLI 2.1.214.)
 | [judge-composition](skills/judge-composition/SKILL.md) | Setting up impartial judges to check a claim, including your own. |
 | [self-play](skills/self-play/SKILL.md) | Testing an idea fairly when your own opinion of it can't be trusted. |
 | [better-skill-creator](skills/better-skill-creator/SKILL.md) | Building a skill, then finding out whether it actually helped. |
-| [upsum](skills/upsum/SKILL.md) | Closing a session on purpose. **Type `/upsum`** — it won't fire by itself. |
-| [spark-steering](skills/spark-steering/SKILL.md) | Finding what's really missing before you install a fix. **Type `/spark-steering`.** |
+| [upsum](skills/upsum/SKILL.md) | Closing a session on purpose. **Invoke explicitly:** `/upsum` in Claude Code or `$upsum` in Codex. |
+| [spark-steering](skills/spark-steering/SKILL.md) | Finding what's really missing before you install a fix. **Invoke explicitly:** `/spark-steering` in Claude Code or `$spark-steering` in Codex. |
 
 Roughly in order of use: write the instructions, hand the work off, check what
 comes back, close out the session.
@@ -128,8 +170,9 @@ spot is another one's job.
 
 ## What's in here
 
-You don't need this repo to use the skills — the plugin install handles that.
-It's here if you want to read them or change them.
+You don't need this repo to use the Claude Code plugin. For Codex, use the
+checkout directly or run the Codex installer above. It's here if you want to
+read or change the shared source skills.
 
 Every skill lives in `skills/<name>/`. That's it: no submodules, no pins, no
 sync step. A plain `git clone` gives you the whole thing.
@@ -177,6 +220,17 @@ bash scripts/test-skills.sh --plan
 
 It prints the plan and stops. It needs `claude` on your `PATH` to have something
 to plan for, and it doesn't install, launch or write anything.
+
+The Codex bridge has its own local check:
+
+```bash
+bash scripts/test-codex-skills.sh
+```
+
+It verifies that all eight `.agents/skills` entries resolve to the shared source
+folders, that `$spark-steering` and `$upsum` stay explicit-only, and that the
+Codex installer makes a disposable copy. It does not invoke a Codex model, so a
+passing result establishes discovery and installation shape—not model behavior.
 
 ## Honest bits
 

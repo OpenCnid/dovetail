@@ -135,6 +135,20 @@ jobs:
         shell: bash
         run: bash scripts/test-skills.sh --static
 
+      # Codex reads the same source tree through checked-in symlinks. Linux
+      # checks that direct bridge. Some Windows Git installations materialize a
+      # checked-out symlink as a plain link file, so that leg verifies the
+      # portable copy installer instead; both modes check manual-only policy.
+      - name: Codex skill bridge
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/test-codex-skills.sh
+
+      - name: Codex skill installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/test-codex-skills.sh --installer-only
+
       # Load-bearing rather than tidy: the marketplace entry is strict: true and
       # `claude plugin tag` refuses to tag when the manifests disagree.
       - name: Version agreement

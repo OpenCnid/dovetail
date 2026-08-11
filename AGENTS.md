@@ -9,6 +9,20 @@
 manifest and the scripts that install and test them. No hooks: see below for
 why, and for what it would take to add one.
 
+## Codex support
+
+Codex discovers this same source tree through `.agents/skills/`. Each entry is a
+symlink into `skills/<name>/`; do not create a second editable Codex copy. Add,
+rename, or remove a skill in `skills/`, then update the bridge and run
+`bash scripts/test-codex-skills.sh` along with the Claude checks. On a host
+whose Git cannot materialize symlinks, run it with `--installer-only` to verify
+the portable installation route instead.
+
+In Codex, invoke the two manual-only workflows as `$spark-steering` and
+`$upsum`. Their `agents/openai.yaml` policies deliberately disable implicit
+invocation. Claude Code keeps its existing `/dovetail:spark-steering` and
+`/dovetail:upsum` behavior.
+
 It did not used to be. Until `0.3.0` this was a distribution pack: eight git
 submodules pinned to commits in eight repositories, which it shipped without
 ever hosting. That arrangement is gone — no submodules, no pins, no `vendor/`,
