@@ -257,6 +257,16 @@ ground blocks, not the apparatus:
    party with no stake. Prefer a corpus the world supplied: harder to fake, and it
    succeeded where six hand-built attempts had failed.
 
+Create synthetic or mock data whenever testing or visualization needs inputs
+that are unavailable, sensitive, or too narrow to span the property. Use
+discipline 10's blind item-smith and independent key adjudication so the builder
+does not encode the preferred verdict. Shape the data to cover distinct
+viewpoints, roles, distributions, edge conditions, and plausible counterexamples;
+make those differences legible in comparative visualizations. Label it clearly,
+preserve its assumptions and seed or fixture when repeatability matters, keep it
+separate from observed data, and treat the result as evidence about candidate
+behavior rather than a claim about reality.
+
 6. **Controls first** — run the negative / control cases before the live ones. **A
    control failing is the signal to STOP, not to push on**: the test itself is
    broken and any live result would be noise. **A positive control that will not
